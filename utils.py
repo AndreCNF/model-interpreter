@@ -8,7 +8,6 @@ import os                                               # os handles directory/w
 import numpy as np                                      # NumPy to handle numeric and NaN operations
 from tqdm.auto import tqdm                              # tqdm allows to track code execution progress
 import numbers                                          # numbers allows to check if data is numeric
-from NeuralNetwork import NeuralNetwork                 # Import the neural network model class
 from sklearn.metrics import roc_auc_score               # ROC AUC model performance metric
 import warnings                                         # Print warnings for bad practices
 import sys                                              # Identify types of exceptions

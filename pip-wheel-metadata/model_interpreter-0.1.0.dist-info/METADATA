@@ -1,0 +1,17 @@
+Metadata-Version: 2.1
+Name: model-interpreter
+Version: 0.1.0
+Summary: An API for intuitive interpretation of machine learning models
+Author: André Ferreira
+Author-email: andrecnf@gmail.com
+Requires-Python: >=3.7,<4.0
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Requires-Dist: colorlover (>=0.3.0,<0.4.0)
+Requires-Dist: comet_ml (>=2.0,<3.0)
+Requires-Dist: numpy (>=1.17,<2.0)
+Requires-Dist: pandas (>=0.25.0,<0.26.0)
+Requires-Dist: plotly (>=4.0,<5.0)
+Requires-Dist: shap @ git+https://github.com/AndreCNF/shap.git@master
+Requires-Dist: torch (>=1.1,<2.0)
+Requires-Dist: tqdm (>=4.32,<5.0)

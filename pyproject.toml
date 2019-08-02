@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "model-interpreter"
+version = "0.1.0"
+description = "An API for intuitive interpretation of machine learning models"
+authors = ["André Ferreira <andrecnf@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+numpy = "^1.17"
+pandas = "^0.25.0"
+torch = "^1.1"
+plotly = "^4.0"
+tqdm = "^4.32"
+colorlover = "^0.3.0"
+shap = {git = "https://github.com/AndreCNF/shap.git"}
+comet_ml = "^2.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"

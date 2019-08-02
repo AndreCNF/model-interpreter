@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: model-interpreter
+Version: 0.1.0
+Summary: An API for intuitive interpretation of machine learning models
+Home-page: https://github.com/AndreCNF/model_interpreter
+Author: André Ferreira
+Author-email: andrecnf@gmail.com
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
