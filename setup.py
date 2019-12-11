@@ -16,7 +16,7 @@ setup(
     name='model-interpreter',
     version='0.1.0',
     description='An API for intuitive interpretation of machine learning models',
-    python_requires='==3.*,>=3.7.0',
+    python_requires='==3.*,>=3.6.0',
     author='André Ferreira',
     author_email='andrecnf@gmail.com',
     packages=['model_interpreter'],

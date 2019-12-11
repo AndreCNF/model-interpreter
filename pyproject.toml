@@ -5,7 +5,7 @@ description = "An API for intuitive interpretation of machine learning models"
 authors = ["André Ferreira <andrecnf@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.6"
 numpy = "^1.17"
 pandas = "^0.25.0"
 torch = "^1.1"

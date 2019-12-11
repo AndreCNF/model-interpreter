@@ -6,7 +6,6 @@ import shap                             # Module used for the calculation of app
 import warnings                         # Print warnings for bad practices
 from tqdm.auto import tqdm              # tqdm allows to track code execution progress
 import time                             # Calculate code execution time
-import utils                            # Contains auxiliary functions
 import plotly                           # Plotly for interactive and pretty plots
 import plotly.graph_objs as go
 import plotly.offline as py
@@ -139,10 +138,10 @@ class KernelFunction:
             possible hidden state.
         '''
         # Make sure the data is of type float
-        data = torch.from_numpy(data).unsqueeze(0).float()
+        data = torch.from_numpy(data).float()
         # Calculate the output
         if self.model_type == 'multivariate_rnn':
-            output = self.model(data, hidden_state=hidden_state)
+            output = self.model(data.unsqueeze(0), hidden_state=hidden_state)
         elif self.model_type == 'mlp':
             output = self.model(data)
         else:
@@ -243,10 +242,14 @@ class ModelInterpreter:
         if type(data) is torch.Tensor:
             self.data = data
             self.labels = labels
+            if model_type == 'mlp':
+                self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
         elif type(data) is np.ndarray:
             # Convert from numpy to pytorch
             self.data = torch.from_numpy(data)
             self.labels = torch.from_numpy(labels)
+            if model_type == 'mlp':
+                self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
         elif type(data) is pd.DataFrame:
             n_ids = data.iloc[:, self.id_column].nunique()      # Total number of unique sequence identifiers
             n_features = len(data.columns)                      # Number of input features
@@ -257,12 +260,12 @@ class ModelInterpreter:
                 data_tensor = du.padding.dataframe_to_padded_tensor(data, self.seq_len_dict, n_ids,
                                                                     n_features, padding_value=padding_value)
                 # Separate labels from features
-                dataset = du.Datasets.Time_Series_Dataset(data_tensor, data)
+                dataset = du.datasets.Time_Series_Dataset(data_tensor, data)
             elif self.model_type == 'mlp':
                 # Convert into a PyTorch tensor
-                data_tensor = torch.from_numpy(data.to_numpy())
+                data_tensor = torch.from_numpy(data.numpy())
                 # Separate labels from features
-                dataset = du.Datasets.Tabular_Dataset(data_tensor, data)
+                dataset = du.datasets.Tabular_Dataset(data_tensor, data)
 
             self.data = dataset.X
             self.labels = dataset.y
@@ -718,12 +721,20 @@ class ModelInterpreter:
                 bkgnd_data = np.zeros((1, len(self.feat_names) + num_id_features))
             else:
                 print(f'Attention: you have chosen to interpret the model using SHAP, with {bkgnd_data.shape[0]} background samples, with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
-                # Sort the background data by sequence length
-                bkgnd_data, x_lengths_bkgnd = du.padding.sort_by_seq_len(bkgnd_data, self.seq_len_dict)
-                # Convert the background data into a 2D NumPy matrix
-                bkgnd_data = du.deep_learning.ts_tensor_to_np_matrix(bkgnd_data, self.feat_num, self.padding_value)
-            # Convert the test data into a 2D NumPy matrix
-            test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
+                if model_type.lower() == 'multivariate_rnn':
+                    # Sort the background data by sequence length
+                    bkgnd_data, x_lengths_bkgnd = du.padding.sort_by_seq_len(bkgnd_data, self.seq_len_dict)
+                    # Convert the background data into a 2D NumPy matrix
+                    bkgnd_data = du.deep_learning.ts_tensor_to_np_matrix(bkgnd_data, self.feat_num, self.padding_value)
+                elif model_type.lower() == 'mlp':
+                    # Just convert background data into a NumPy matrix
+                    bkgnd_data = bkgnd_data.numpy()
+            if model_type.lower() == 'multivariate_rnn':
+                # Convert the test data into a 2D NumPy matrix
+                test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
+            elif model_type.lower() == 'mlp':
+                # Just convert background data into a NumPy matrix
+                test_data = test_data.numpy()
             # Create a function that represents the model's feedforward operation on a single instance
             kf = KernelFunction(self.model, model_type=model_type)
             # Use the background dataset to integrate over
@@ -787,13 +798,14 @@ class ModelInterpreter:
             that a dataframe of the new data is provided (parameter df) so that
             the sequence lengths are calculated. Otherwise, the original
             sequence lengths known by the model interpreter are used.
-        model_type : string, default 'multivariate_rnn'
+        model_type : string, default None
             Sets the type of machine learning model. Important to know what type
             of inference and data processing to do. Currently available options
             are ['multivariate_rnn', 'mlp'].
         df : pandas.DataFrame, default None
             Dataframe containing the new data so as to calculate the sequence
-            lengths of the new ids. Only used if new_data is set to True.
+            lengths of the new ids. Only used if new_data is set to True and 
+            `model_type` is 'multivariate_rnn'.
         instance_importance : bool, default True
             If set to True, instance importance is made on the data. In other
             words, the algorithm will analyze the impact that each instance of
@@ -805,7 +817,7 @@ class ModelInterpreter:
             not in the entire sequence at once. For example, from the feature
             importance alone, it's not straightforward how a value in a previous
             instance impacted the current output. Current options include SHAP
-            Kernel Explainer (default) and mask filter. If set to False, no
+            Kernel Explainer ('shap') and 'mask filter'. If set to False, no
             feature importance will be done.
         fast_calc : bool, default None
             If set to True, the algorithm uses simple mask filters, occluding
@@ -843,7 +855,7 @@ class ModelInterpreter:
         # Confirm that the model is in evaluation mode to deactivate dropout
         self.model.eval()
 
-        if feature_importance:
+        if feature_importance is not None:
             try:
                 feature_importance = feature_importance.lower()
                 if feature_importance != 'shap' and feature_importance != 'mask filter':
@@ -917,9 +929,9 @@ class ModelInterpreter:
             print('Calculating feature importance scores...')
             # Calculate the scores of importance of each feature in each instance
             if feature_importance == 'mask filter' and debug_loss:
-                self.feat_scores, loss_mtx = self.feature_importance(test_data, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=True)
+                self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=True)
             else:
-                self.feat_scores = self.feature_importance(test_data, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=False)
+                self.feat_scores = self.feature_importance(test_data, model_type, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=False)
 
         print('Done!')
 
