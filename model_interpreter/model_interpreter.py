@@ -733,7 +733,10 @@ class ModelInterpreter:
                 # Convert the test data into a 2D NumPy matrix
                 test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
             elif model_type.lower() == 'mlp':
-                # Just convert background data into a NumPy matrix
+                # Remove ID columns from the data
+                bkgnd_data = du.deep_learning.remove_tensor_column(bkgnd_data, [self.id_column, self.inst_column], inplace=True)
+                test_data = du.deep_learning.remove_tensor_column(test_data, [self.id_column, self.inst_column], inplace=True)
+                # Convert test data into a NumPy matrix
                 test_data = test_data.numpy()
             # Create a function that represents the model's feedforward operation on a single instance
             kf = KernelFunction(self.model, model_type=model_type)
