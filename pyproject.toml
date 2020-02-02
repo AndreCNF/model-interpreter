@@ -14,6 +14,10 @@ tqdm = "^4.32"
 colorlover = "^0.3.0"
 shap = {git = "https://github.com/AndreCNF/shap.git"}
 comet_ml = "^2.0"
+pdoc3 = "^0.7.2"
+everett = "^1.0"
+ray = "^0.8.1"
+modin = "^0.7.0"
 
 [tool.poetry.dev-dependencies]
 

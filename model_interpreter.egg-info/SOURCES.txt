@@ -1,7 +1,9 @@
 README.md
 setup.py
 model_interpreter/__init__.py
+model_interpreter/model_interpreter.py
 model_interpreter.egg-info/PKG-INFO
 model_interpreter.egg-info/SOURCES.txt
 model_interpreter.egg-info/dependency_links.txt
+model_interpreter.egg-info/requires.txt
 model_interpreter.egg-info/top_level.txt

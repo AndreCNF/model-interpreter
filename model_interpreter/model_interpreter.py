@@ -146,7 +146,10 @@ class KernelFunction:
             output = self.model(data)
         else:
             raise Exception(f'ERROR: Invalid model type. It must be "multivariate_rnn" or "mlp", not {self.model_type}.')
-        return output.detach().numpy()
+        if torch.cuda.is_available():
+            return output.detach().cpu().numpy()
+        else:
+            return output.detach().numpy()
 
 class ModelInterpreter:
     def __init__(self, model, data, labels=None, model_type='multivariate_rnn',
@@ -663,9 +666,10 @@ class ModelInterpreter:
         if fast_calc is False:
 
         bkgnd_data : torch.Tensor, default None
-            In case of setting fast_calc to True, which makes the algorithm use
-            SHAP in the feature importance, the background data used in the
-            explainer can be set through this parameter.
+            In case of setting fast_calc to False, which makes the algorithm
+            require background data in SHAP during the feature importance, the 
+            background data used in the explainer can be set through this 
+            parameter.
 
         if fast_calc is True:
 
@@ -714,7 +718,7 @@ class ModelInterpreter:
 
         if method.lower() == 'shap':
             if fast_calc:
-                print(f'Attention: you have chosen to interpret the model using SHAP, with {bkgnd_data.shape[0]} background samples, with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
+                print(f'Attention: you have chosen to interpret the model using SHAP, with one background sample (all zeros), with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
                 print('Evaluating the model with a reference value of zero. This should only be done if all the data is processed in a way that, for categorical features, 0 represents missing attribute and, for continuous features, 0 represents the average value of that feature.')
                 # Use a single all zeroes sample as a reference value
                 num_id_features = sum([1 if i is not None else 0 for i in [self.id_column, self.inst_column]])
@@ -748,7 +752,7 @@ class ModelInterpreter:
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
             print('Calculating feature importance scores for each instance in the test data...')
-            feat_scores = self.explainer.shap_values(test_data, l1_reg='num_features(10)', nsamples=self.SHAP_bkgnd_samples)
+            feat_scores = self.explainer.shap_values(test_data, l1_reg='num_features(20)', nsamples=self.SHAP_bkgnd_samples)
             print(f'Calculation of SHAP values took {time.time() - start_time} seconds')
             return feat_scores
 
@@ -813,7 +817,7 @@ class ModelInterpreter:
             If set to True, instance importance is made on the data. In other
             words, the algorithm will analyze the impact that each instance of
             an input sequence had on the output.
-        feature_importance : bool, default False
+        feature_importance : bool or string, default False
             Defines which feature importance interpretability technique to use.
             The algorithm will analyze the impact that each feature of
             an instance had on the output. This is analyzed instance by instance,
@@ -862,9 +866,9 @@ class ModelInterpreter:
             try:
                 feature_importance = feature_importance.lower()
                 if feature_importance != 'shap' and feature_importance != 'mask filter':
-                    raise(f'ERROR: Specified {feature_importance} feature importance method isn\'t valid. Available options are \"shap\" and\"mask filter\".')
+                    raise Exception(f'ERROR: Specified {feature_importance} feature importance method isn\'t valid. Available options are \"shap\" and\"mask filter\".')
             except:
-                raise(f'ERROR: {feature_importance} is an incorrectly defined feature importance method, as it should be a string. Available options are \"shap\" and\"mask filter\".')
+                raise Exception(f'ERROR: {feature_importance} is an incorrectly defined feature importance method, as it should be a string. Available options are \"shap\" and\"mask filter\".')
 
         if fast_calc is None:
             # Use the predefined option if fast_calc isn't set in the function call

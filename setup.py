@@ -23,8 +23,9 @@ setup(
     package_data={},
     install_requires=[
         'colorlover==0.*,>=0.3.0', 'comet-ml==2.*,>=2.0.0',
-        'numpy==1.*,>=1.17.0', 'pandas==0.*,>=0.25.0', 'plotly==4.*,>=4.0.0',
-        'shap', 'torch==1.*,>=1.1.0', 'tqdm==4.*,>=4.32.0'
+        'everett==1.*,>=1.0.0', 'modin==0.*,>=0.7.0', 'numpy==1.*,>=1.17.0',
+        'pandas==0.*,>=0.25.0', 'pdoc3==0.*,>=0.7.2', 'plotly==4.*,>=4.0.0',
+        'ray==0.*,>=0.8.1', 'shap', 'torch==1.*,>=1.1.0', 'tqdm==4.*,>=4.32.0'
     ],
     dependency_links=['git+https://github.com/AndreCNF/shap.git#egg=shap'],
 )
