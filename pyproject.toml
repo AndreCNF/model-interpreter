@@ -16,7 +16,7 @@ shap = {git = "https://github.com/AndreCNF/shap.git"}
 comet_ml = "^2.0"
 pdoc3 = "^0.7.2"
 everett = "^1.0"
-ray = "^0.8.1"
+ray = "0.8.0"
 modin = "^0.7.0"
 
 [tool.poetry.dev-dependencies]
