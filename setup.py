@@ -16,16 +16,17 @@ setup(
     name='model-interpreter',
     version='0.1.0',
     description='An API for intuitive interpretation of machine learning models',
-    python_requires='==3.*,>=3.6.0',
+    python_requires='==3.*,>=3.6.1',
     author='André Ferreira',
     author_email='andrecnf@gmail.com',
     packages=['model_interpreter'],
     package_data={},
     install_requires=[
-        'colorlover==0.*,>=0.3.0', 'comet-ml==2.*,>=2.0.0',
-        'everett==1.*,>=1.0.0', 'modin==0.*,>=0.7.0', 'numpy==1.*,>=1.17.0',
-        'pandas==0.*,>=0.25.0', 'pdoc3==0.*,>=0.7.2', 'plotly==4.*,>=4.0.0',
-        'ray==0.*,>=0.8.1', 'shap', 'torch==1.*,>=1.1.0', 'tqdm==4.*,>=4.32.0'
+        'colorlover==0.*,>=0.3.0', 'comet-ml==3.*,>=3.1.2',
+        'everett==1.*,>=1.0.0', 'modin==0.*,>=0.7.2', 'numpy==1.*,>=1.17.0',
+        'pandas==1.0.1', 'pdoc3==0.*,>=0.7.2', 'pillow==7.*,>=7.0.0',
+        'plotly==4.*,>=4.0.0', 'ray==0.8.0', 'shap', 'torch==1.*,>=1.1.0',
+        'tqdm==4.*,>=4.32.0'
     ],
     dependency_links=['git+https://github.com/AndreCNF/shap.git#egg=shap'],
 )

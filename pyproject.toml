@@ -5,9 +5,9 @@ description = "An API for intuitive interpretation of machine learning models"
 authors = ["André Ferreira <andrecnf@gmail.com>"]
 
 [tool.poetry.dependencies]
-python = "^3.6"
+python = "^3.6.1"
 numpy = "^1.17"
-pandas = "^0.25.0"
+pandas = "1.0.1"
 torch = "^1.1"
 plotly = "^4.0"
 tqdm = "^4.32"
@@ -16,8 +16,8 @@ shap = {git = "https://github.com/AndreCNF/shap.git"}
 pdoc3 = "^0.7.2"
 everett = "^1.0"
 ray = "0.8.0"
-modin = "^0.7.0"
-comet-ml = "^3.0.2"
+modin = "^0.7.2"
+comet-ml = "^3.1.2"
 pillow = "^7.0.0"
 
 [tool.poetry.dev-dependencies]
