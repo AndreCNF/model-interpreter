@@ -20,8 +20,9 @@ POS_COLOR = 'rgba(255,13,87,1)'
 NEG_COLOR = 'rgba(30,136,229,1)'
 
 # Auxiliary hidden methods
-def calc_instance_score(model, sequence_data, instance, ref_output, x_length, occlusion_wgt=0.7,
-                        id_column=0, inst_column=1):
+def calc_instance_score(model, sequence_data, instance, ref_output, x_length,
+                        occlusion_wgt=0.7, id_column=0, inst_column=1,
+                        is_custom=False):
     '''Calculate the instance importance score for a given instance.
 
     Parameters
@@ -57,6 +58,10 @@ def calc_instance_score(model, sequence_data, instance, ref_output, x_length, oc
     inst_column : int, default 1
         Number of the column which corresponds to the instance or timestamp
         identifier in the data tensor.
+    is_custom : bool, default False
+        If set to True, the method will assume that the model being used is a
+        custom built one, which won't require sequence length information during
+        the feedforward process.
 
     Returns
     -------
@@ -65,10 +70,7 @@ def calc_instance_score(model, sequence_data, instance, ref_output, x_length, oc
         specified parameters.
     '''
     # Remove identifier columns from the data
-    features_idx = list(range(sequence_data.shape[1]))
-    features_idx.remove(id_column)
-    features_idx.remove(inst_column)
-    sequence_data = sequence_data[:, features_idx]
+    sequence_data = du.deep_learning.remove_tensor_column(sequence_data, [id_column, inst_column], inplace=True)
     # Indeces without the instance that is being analyzed
     instances_idx = list(range(sequence_data.shape[0]))
     instances_idx.remove(instance)
@@ -77,7 +79,10 @@ def calc_instance_score(model, sequence_data, instance, ref_output, x_length, oc
     # Add a third dimension for the data to be readable by the model
     sequence_data = sequence_data.unsqueeze(0)
     # Calculate the output without the instance that is being analyzed
-    new_output = model(sequence_data, [x_length-1])
+    if is_custom is True:
+        new_output = model(sequence_data)
+    else:
+        new_output = model(sequence_data, [x_length-1])
     # Only use the last output (i.e. the one from the last instance of the sequence)
     new_output = new_output[-1].item()
     # Flag that indicates whether the output variation component will be used in the instance importance score
@@ -153,10 +158,10 @@ class KernelFunction:
 
 class ModelInterpreter:
     def __init__(self, model, data, labels=None, model_type='multivariate_rnn',
-                 seq_len_dict=None, id_column=0, inst_column=None,
-                 label_column=None, fast_calc=True, SHAP_bkgnd_samples=1000,
-                 random_seed=42, feat_names=None, padding_value=999999, 
-                 occlusion_wgt=0.7):
+                 is_custom=False, already_embedded=False, seq_len_dict=None,
+                 id_column=0, inst_column=None, label_column=None, fast_calc=True,
+                 SHAP_bkgnd_samples=1000, random_seed=42, feat_names=None,
+                 padding_value=999999, occlusion_wgt=0.7):
         '''A machine learning model interpreter which calculates instance and
         feature importance.
 
@@ -181,6 +186,14 @@ class ModelInterpreter:
             Sets the type of machine learning model. Important to know what type
             of inference and data processing to do. Currently available options
             are ['multivariate_rnn', 'mlp'].
+        is_custom : bool, default False
+            If set to True, the method will assume that the model being used is a
+            custom built one, which won't require sequence length information during
+            the feedforward process.
+        already_embedded : bool, default False
+            If set to True, it means that the categorical features are already
+            embedded when fetching a batch, i.e. there's no need to run the embedding
+            layer(s) during the model's feedforward.
         seq_len_dict : dict, default None
             Dictionary containing the sequence lengths for each index of the
             original dataframe. This allows to ignore the padding done in
@@ -188,18 +201,19 @@ class ModelInterpreter:
         id_column : int, default 0
             Number of the column which corresponds to the subject identifier in
             the data tensor.
-        inst_column : int, default 1
+        inst_column : int, default None
             Number of the column which corresponds to the instance or timestamp
             identifier in the data tensor.
-        label_column : int, default None
+        label_column_num : int, default None
             Number of the column which corresponds to the label in the data
             tensor. Only needed if the data is in dataframe format.
         fast_calc : bool, default True
-            If set to True, the algorithm uses simple mask filters, occluding
-            instances and replacing features with reference values, in order
-            to do a fast interpretation of the model. If set to False, SHAP
-            values are used for a more precise and truthful interpretation of
-            the model's behavior, requiring longer computation times.
+            If set to True, the algorithm uses less background samples (SHAP)
+            or optimization steps (mask filter), in order to do a fast
+            interpretation of the model. If set to False, the process takes
+            more time in order to get a more precise and truthful
+            interpretation of the model's behavior, requiring longer
+            computation times.
         SHAP_bkgnd_samples : int, default 1000
             Number of samples to use as background data, in case a SHAP
             explainer is applied (fast_calc must be set to False).
@@ -225,9 +239,9 @@ class ModelInterpreter:
         # Initialize parameters according to user input
         self.model = model
         self.seq_len_dict = seq_len_dict
-        self.id_column = id_column
-        self.inst_column = inst_column
-        self.label_column = label_column
+        self.id_column_num = id_column
+        self.inst_column_num = inst_column
+        self.label_column_num = label_column
         self.fast_calc = fast_calc
         self.SHAP_bkgnd_samples = SHAP_bkgnd_samples
         self.random_seed = random_seed
@@ -238,6 +252,8 @@ class ModelInterpreter:
             self.model_type = model_type
         else:
             raise Exception(f'ERROR: Invalid model type. It must be "multivariate_rnn" or "mlp", not {model_type}.')
+        self.is_custom = is_custom
+        self.already_embedded = already_embedded
 
         # Put the model in evaluation mode to deactivate dropout
         self.model.eval()
@@ -254,16 +270,43 @@ class ModelInterpreter:
             if model_type == 'mlp':
                 self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
         elif type(data) is pd.DataFrame:
-            n_ids = data.iloc[:, self.id_column].nunique()      # Total number of unique sequence identifiers
-            n_features = len(data.columns)                      # Number of input features
+            # Fetch the column names, ignoring the ID column
+            self.feat_names = list(data.columns)
+            # Convert the column indeces to the column names
+            self.id_column_name = self.feat_names[self.id_column_num]
+            self.inst_column_name = self.feat_names[self.inst_column_num]
+            if self.label_column_num is None:
+                # Counter that indicates in which column we're in when searching for the label column
+                col_num = 0
+                for col in data.columns:
+                    if 'label' in col:
+                        # Column name corresponding to the label
+                        self.label_column_name = col
+                        # Column number corresponding to the label
+                        self.label_column_num = col_num
+                        break
+                    col_num += 1
+            if self.label_column_name is None:
+                self.label_column_name = self.feat_names[self.label_column_num]
+            [self.feat_names.remove(col) for col in [self.id_column_name,
+                                                     self.label_column_name]]
+            # Fetch the column numbers, ignoring the ID column
+            self.feat_num = list(range(len(data.columns)))
+            [self.feat_num.remove(col) for col in [self.id_column_num, self.label_column_num]]
+            if self.model_type == 'multivariate_rnn':
+                # Also ignore the instance ID column
+                self.feat_names.remove(self.feat_names[self.inst_column_num])
+                self.feat_num.remove(self.inst_column_num)
             if self.model_type == 'multivariate_rnn':
                 # Find the sequence lengths of the data
-                self.seq_len_dict = du.padding.get_sequence_length_dict(df, id_column=self.id_column, ts_column=self.inst_column)
+                self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
                 # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
-                data_tensor = du.padding.dataframe_to_padded_tensor(data, self.seq_len_dict, n_ids,
-                                                                    n_features, padding_value=padding_value)
+                data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
+                                                                    ts_column=self.inst_column_name, padding_value=padding_value,
+                                                                    inplace=True)
                 # Separate labels from features
-                dataset = du.datasets.Time_Series_Dataset(data_tensor, data)
+                dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
+                                                          seq_len_dict=self.seq_len_dict)
             elif self.model_type == 'mlp':
                 # Convert into a PyTorch tensor
                 data_tensor = torch.from_numpy(data.numpy())
@@ -272,20 +315,6 @@ class ModelInterpreter:
 
             self.data = dataset.X
             self.labels = dataset.y
-
-            assert self.label_column is not None, 'In case the data is in dataframe format, the number of the column corresponding to the label must be provided.'
-
-            # Fetch the column names, ignoring the ID column
-            self.feat_names = list(data.columns)
-            [self.feat_names.remove(col) for col in [self.feat_names[self.id_column],
-                                                     self.feat_names[self.label_column]]]
-            # Fetch the column numbers, ignoring the ID column
-            self.feat_num = list(range(len(data.columns)))
-            [self.feat_num.remove(col) for col in [self.id_column, self.label_column]]
-            if self.model_type == 'multivariate_rnn':
-                # Also ignore the instance ID column
-                self.feat_names.remove(self.feat_names[self.inst_column])
-                self.feat_num.remove(self.inst_column)
         else:
             raise Exception('ERROR: Invalid data type. Please provide data in a Pandas DataFrame, PyTorch Tensor or NumPy Array format.')
 
@@ -601,10 +630,14 @@ class ModelInterpreter:
         # Make sure that the data is in type float
         data = data.float()
         # Model output when using all the original instances in the input sequences
-        ref_output, _ = du.deep_learning.model_inference(self.model, self.seq_len_dict,
-                                                         data=(data, labels), metrics=[''],
+        ref_output, _ = du.deep_learning.model_inference(self.model, data=(data, labels),
+                                                         metrics=[''], model_type=self.model_type,
+                                                         is_custom=self.is_custom,
+                                                         seq_len_dict=self.seq_len_dict,
+                                                         padding_value=self.padding_value,
                                                          seq_final_outputs=seq_final_outputs,
-                                                         cols_to_remove=[self.id_column, self.inst_column])
+                                                         cols_to_remove=[self.id_column_num, self.inst_column_num],
+                                                         already_embedded=self.already_embedded)
 
         if not seq_final_outputs:
             # Cumulative sequence lengths (true end of the sequences)
@@ -614,7 +647,8 @@ class ModelInterpreter:
             ref_output = [ref_output[start_idx[i]:final_seq_idx[i]] for i in range(len(start_idx))]
 
         inst_scores = [[calc_instance_score(self.model, data[seq_num, :, :], inst, ref_output[seq_num],
-                                            x_lengths[seq_num], occlusion_wgt, self.id_column, self.inst_column)
+                                            x_lengths[seq_num], occlusion_wgt, self.id_column_num, self.inst_column_num,
+                                            self.is_custom)
                         for inst in range(x_lengths[seq_num])] for seq_num in tqdm(range(data.shape[0]), disable=not see_progress)]
         # DEBUG
         # inst_scores = []
@@ -622,7 +656,7 @@ class ModelInterpreter:
         #     tmp_list = []
         #     for inst in range(x_lengths[seq_num]):
         #         tmp_list.append(calc_instance_score(self.model, data[seq_num, :, :], inst, ref_output[seq_num],
-        #                                             x_lengths[seq_num], occlusion_wgt, self.id_column, self.inst_column))
+        #                                             x_lengths[seq_num], occlusion_wgt, self.id_column_num, self.inst_column_num))
         #     inst_scores.append(tmp_list)
 
         # Pad the instance scores lists so that all have the same length
@@ -632,9 +666,9 @@ class ModelInterpreter:
         inst_scores = np.array(inst_scores)
         return inst_scores
 
-    def feature_importance(self, test_data=None, model_type=None, 
+    def feature_importance(self, test_data=None, model_type=None,
                            method='shap', fast_calc=None, see_progress=True,
-                           bkgnd_data=None, max_iter=100, l1_coeff=0, lr=0.001, 
+                           bkgnd_data=None, max_iter=100, l1_coeff=0, lr=0.001,
                            recur_layer=None, debug_loss=False):
         '''Calculate the feature importance scores to interpret the impact
         of each feature in each instance's output.
@@ -667,8 +701,8 @@ class ModelInterpreter:
 
         bkgnd_data : torch.Tensor, default None
             In case of setting fast_calc to False, which makes the algorithm
-            require background data in SHAP during the feature importance, the 
-            background data used in the explainer can be set through this 
+            require background data in SHAP during the feature importance, the
+            background data used in the explainer can be set through this
             parameter.
 
         if fast_calc is True:
@@ -721,7 +755,7 @@ class ModelInterpreter:
                 print(f'Attention: you have chosen to interpret the model using SHAP, with one background sample (all zeros), with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
                 print('Evaluating the model with a reference value of zero. This should only be done if all the data is processed in a way that, for categorical features, 0 represents missing attribute and, for continuous features, 0 represents the average value of that feature.')
                 # Use a single all zeroes sample as a reference value
-                num_id_features = sum([1 if i is not None else 0 for i in [self.id_column, self.inst_column]])
+                num_id_features = sum([1 if i is not None else 0 for i in [self.id_column_num, self.inst_column_num]])
                 bkgnd_data = np.zeros((1, len(self.feat_names) + num_id_features))
             else:
                 print(f'Attention: you have chosen to interpret the model using SHAP, with {bkgnd_data.shape[0]} background samples, with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
@@ -738,8 +772,8 @@ class ModelInterpreter:
                 test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
             elif model_type.lower() == 'mlp':
                 # Remove ID columns from the data
-                bkgnd_data = du.deep_learning.remove_tensor_column(bkgnd_data, [self.id_column, self.inst_column], inplace=True)
-                test_data = du.deep_learning.remove_tensor_column(test_data, [self.id_column, self.inst_column], inplace=True)
+                bkgnd_data = du.deep_learning.remove_tensor_column(bkgnd_data, [self.id_column_num, self.inst_column_num], inplace=True)
+                test_data = du.deep_learning.remove_tensor_column(test_data, [self.id_column_num, self.inst_column_num], inplace=True)
                 # Convert test data into a NumPy matrix
                 test_data = test_data.numpy()
             # Create a function that represents the model's feedforward operation on a single instance
@@ -747,7 +781,7 @@ class ModelInterpreter:
             # Use the background dataset to integrate over
             print('Creating a SHAP kernel explainer...')
             self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
-                                                  id_col_num=self.id_column, ts_col_num=self.inst_column)
+                                                  id_col_num=self.id_column_num, ts_col_num=self.inst_column_num)
             # Count the time that takes to calculate the SHAP values
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
@@ -777,9 +811,9 @@ class ModelInterpreter:
 
     # [Bonus TODO] Upload model explainer and interpretability plots to Comet.ml
     def interpret_model(self, bkgnd_data=None, test_data=None, test_labels=None,
-                        new_data=False, model_type=None, df=None, 
-                        instance_importance=True, feature_importance=False, 
-                        fast_calc=None, see_progress=True, save_data=True, 
+                        new_data=False, model_type=None, df=None,
+                        instance_importance=True, feature_importance=False,
+                        fast_calc=None, see_progress=True, save_data=True,
                         debug_loss=False):
         '''Method to calculate scores of feature and/or instance importance, in
         order to be able to interpret a model on a given data.
@@ -811,7 +845,7 @@ class ModelInterpreter:
             are ['multivariate_rnn', 'mlp'].
         df : pandas.DataFrame, default None
             Dataframe containing the new data so as to calculate the sequence
-            lengths of the new ids. Only used if new_data is set to True and 
+            lengths of the new ids. Only used if new_data is set to True and
             `model_type` is 'multivariate_rnn'.
         instance_importance : bool, default True
             If set to True, instance importance is made on the data. In other
@@ -827,11 +861,12 @@ class ModelInterpreter:
             Kernel Explainer ('shap') and 'mask filter'. If set to False, no
             feature importance will be done.
         fast_calc : bool, default None
-            If set to True, the algorithm uses simple mask filters, occluding
-            instances and replacing features with reference values, in order
-            to do a fast interpretation of the model. If set to False, SHAP
-            values are used for a more precise and truthful interpretation of
-            the model's behavior, requiring longer computation times.
+            If set to True, the algorithm uses less background samples (SHAP)
+            or optimization steps (mask filter), in order to do a fast
+            interpretation of the model. If set to False, the process takes
+            more time in order to get a more precise and truthful
+            interpretation of the model's behavior, requiring longer
+            computation times.
         see_progress : bool, default True
             If set to True, a progress bar will show up indicating the execution
             of the instance importance scores calculations.
@@ -862,7 +897,7 @@ class ModelInterpreter:
         # Confirm that the model is in evaluation mode to deactivate dropout
         self.model.eval()
 
-        if feature_importance is not None:
+        if feature_importance is not None and feature_importance is not False:
             try:
                 feature_importance = feature_importance.lower()
                 if feature_importance != 'shap' and feature_importance != 'mask filter':
@@ -907,7 +942,7 @@ class ModelInterpreter:
                 if df is None:
                     raise Exception('ERROR: A dataframe must be provided in order to work with the new data.')
                 # Find the sequence lengths of the new data
-                seq_len_dict = du.padding.get_sequence_length_dict(df, id_column=self.id_column, ts_column=self.inst_column)
+                seq_len_dict = du.padding.get_sequence_length_dict(df, id_column=self.id_column_num, ts_column=self.inst_column_num)
                 # Sort the data by sequence length
                 test_data, test_labels, x_lengths_test = du.padding.sort_by_seq_len(test_data, seq_len_dict, test_labels)
             else:
@@ -927,12 +962,12 @@ class ModelInterpreter:
             self.bkgnd_data = bkgnd_data
             self.test_data = test_data
 
-        if instance_importance:
+        if instance_importance is True:
             print('Calculating instance importance scores...')
             # Calculate the scores of importance of each instance
             self.inst_scores = self.instance_importance(test_data, test_labels, x_lengths_test, see_progress)
 
-        if feature_importance:
+        if feature_importance is not False:
             print('Calculating feature importance scores...')
             # Calculate the scores of importance of each feature in each instance
             if feature_importance == 'mask filter' and debug_loss:
@@ -1030,10 +1065,14 @@ class ModelInterpreter:
                 raise Exception('ERROR: By setting show_pred_prob to True, either the prediction probabilities (pred_prob) or the labels must be provided.')
 
             # Calculate the prediction probabilities for the provided data
-            pred_prob, _ = du.deep_learning.model_inference(self.model, self.seq_len_dict,
-                                                            data=(orig_data, labels),
-                                                            metrics=[''], seq_final_outputs=True,
-                                                            cols_to_remove=[self.id_column, self.inst_column])
+            pred_prob, _ = du.deep_learning.model_inference(self.model, data=(orig_data, labels),
+                                                             metrics=[''], model_type=self.model_type,
+                                                             is_custom=self.is_custom,
+                                                             seq_len_dict=self.seq_len_dict,
+                                                             padding_value=self.padding_value,
+                                                             seq_final_outputs=True,
+                                                             cols_to_remove=[self.id_column_num, self.inst_column_num],
+                                                             already_embedded=self.already_embedded)
 
         # Convert the prediction probability data into a NumPy array
         if type(pred_prob) is torch.Tensor:
@@ -1048,7 +1087,7 @@ class ModelInterpreter:
         if len(inst_scores.shape) == 1 or (id is not None and type(id) is not list):
             # True sequence length of the current id's data
             if seq_len is None:
-                seq_len = self.seq_len_dict[orig_data[id, 0, self.id_column].item()]
+                seq_len = self.seq_len_dict[orig_data[id, 0, self.id_column_num].item()]
 
             # [TODO] Add a prediction probability bar plot like in the multiple sequences case
 
@@ -1062,7 +1101,7 @@ class ModelInterpreter:
                                                                      neg_color=NEG_COLOR))
                           )]
             layout = go.Layout(
-                                title=f'Instance importance scores for ID {int(orig_data[id, 0, self.id_column])}',
+                                title=f'Instance importance scores for ID {int(orig_data[id, 0, self.id_column_num])}',
                                 xaxis=dict(title='Instance'),
                                 yaxis=dict(title='Importance scores')
                               )
@@ -1078,7 +1117,7 @@ class ModelInterpreter:
 
             # Unique patient ids in string format
             patients = [str(int(item)) for item in [tensor.item()
-                        for tensor in list(orig_data[:, 0, self.id_column])]]
+                        for tensor in list(orig_data[:, 0, self.id_column_num])]]
 
             # Sequence instances count, used as X in the plot
             seq_insts_x = [list(range(inst_scores.shape[1]))
@@ -1148,7 +1187,7 @@ class ModelInterpreter:
                                     'y0': y0,
                                     'x1': x1_fill,
                                     'y1': y0 + step,
-                                    'fillcolor': pred_colors[int(len(pred_colors)-1-(max(pred_prob[i]*len(pred_colors)-1, 0)))]
+                                    'fillcolor': pred_colors[int(len(pred_colors)-1-max(pred_prob[i]*len(pred_colors)-1, 0))]
                                  }
                 shapes_list.append(shape_unfilled)
                 shapes_list.append(shape_filled)
