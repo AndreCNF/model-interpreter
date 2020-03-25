@@ -10,6 +10,7 @@ import plotly                           # Plotly for interactive and pretty plot
 import plotly.graph_objs as go
 import plotly.offline as py
 import colorlover as cl                 # Get colors from colorscales
+from functools import partial           # Enables using functions with some fixed parameters
 import data_utils as du                 # Data science and machine learning relevant methods
 
 if du.utils.in_ipynb:
@@ -288,15 +289,28 @@ class ModelInterpreter:
                     col_num += 1
             if self.label_column_name is None:
                 self.label_column_name = self.feat_names[self.label_column_num]
-            [self.feat_names.remove(col) for col in [self.id_column_name,
-                                                     self.label_column_name]]
+            self.feat_names  = du.utils.remove_from_list(self.feat_names,
+                                                         to_remove=[self.id_column_name,
+                                                                    self.label_column_name],
+                                                         update_idx=False)
             # Fetch the column numbers, ignoring the ID column
             self.feat_num = list(range(len(data.columns)))
-            [self.feat_num.remove(col) for col in [self.id_column_num, self.label_column_num]]
+            self.feat_num  = du.utils.remove_from_list(self.feat_num,
+                                                       to_remove=self.id_column_num,
+                                                       update_idx=False)
+            # Also update the idx when removing the label, since the features
+            # tensors aren't going to contain the label
+            self.feat_num  = du.utils.remove_from_list(self.feat_num,
+                                                       to_remove=self.label_column_num,
+                                                       update_idx=True)
             if self.model_type == 'multivariate_rnn':
                 # Also ignore the instance ID column
-                self.feat_names.remove(self.feat_names[self.inst_column_num])
-                self.feat_num.remove(self.inst_column_num)
+                self.feat_names  = du.utils.remove_from_list(self.feat_names,
+                                                             to_remove=self.inst_column_name,
+                                                             update_idx=False)
+                self.feat_num  = du.utils.remove_from_list(self.feat_num,
+                                                           to_remove=self.inst_column_num,
+                                                           update_idx=False)
             if self.model_type == 'multivariate_rnn':
                 # Find the sequence lengths of the data
                 self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
@@ -780,8 +794,16 @@ class ModelInterpreter:
             kf = KernelFunction(self.model, model_type=model_type)
             # Use the background dataset to integrate over
             print('Creating a SHAP kernel explainer...')
+            if self.is_custom is False:
+                # Let SHAP find the recurrent layer
+                recur_layer = None
+            else:
+                # When using custom models, the whole model behaves as a recurrent layer
+                # We just need to make sure that it returns the hidden state
+                recur_layer = partial(self.model.forward, get_hidden_state=True)
             self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
-                                                  id_col_num=self.id_column_num, ts_col_num=self.inst_column_num)
+                                                  id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
+                                                  recur_layer=recur_layer)
             # Count the time that takes to calculate the SHAP values
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
