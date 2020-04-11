@@ -15,7 +15,7 @@ colorlover = "^0.3.0"
 shap = {git = "https://github.com/AndreCNF/shap.git"}
 pdoc3 = "^0.7.2"
 everett = "^1.0"
-ray = "0.8.0"
+ray = "^0.8.4"
 modin = "^0.7.2"
 comet-ml = "^3.1.2"
 pillow = "^7.0.0"
