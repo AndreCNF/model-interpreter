@@ -13,9 +13,6 @@ import colorlover as cl                 # Get colors from colorscales
 from functools import partial           # Enables using functions with some fixed parameters
 import data_utils as du                 # Data science and machine learning relevant methods
 
-if du.utils.in_ipynb:
-    plotly.offline.init_notebook_mode(connected=True)
-
 # Constants
 POS_COLOR = 'rgba(255,13,87,1)'
 NEG_COLOR = 'rgba(30,136,229,1)'
@@ -289,29 +286,28 @@ class ModelInterpreter:
                     col_num += 1
             if self.label_column_name is None:
                 self.label_column_name = self.feat_names[self.label_column_num]
-            self.feat_names  = du.utils.remove_from_list(self.feat_names,
-                                                         to_remove=[self.id_column_name,
-                                                                    self.label_column_name],
-                                                         update_idx=False)
+            self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                        to_remove=[self.id_column_name,
+                                                                   self.label_column_name],
+                                                        update_idx=False)
             # Fetch the column numbers, ignoring the ID column
             self.feat_num = list(range(len(data.columns)))
-            self.feat_num  = du.utils.remove_from_list(self.feat_num,
-                                                       to_remove=self.id_column_num,
-                                                       update_idx=False)
+            self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                      to_remove=self.id_column_num,
+                                                      update_idx=False)
             # Also update the idx when removing the label, since the features
             # tensors aren't going to contain the label
-            self.feat_num  = du.utils.remove_from_list(self.feat_num,
-                                                       to_remove=self.label_column_num,
-                                                       update_idx=True)
+            self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                      to_remove=self.label_column_num,
+                                                      update_idx=True)
             if self.model_type == 'multivariate_rnn':
                 # Also ignore the instance ID column
-                self.feat_names  = du.utils.remove_from_list(self.feat_names,
-                                                             to_remove=self.inst_column_name,
-                                                             update_idx=False)
-                self.feat_num  = du.utils.remove_from_list(self.feat_num,
-                                                           to_remove=self.inst_column_num,
-                                                           update_idx=False)
-            if self.model_type == 'multivariate_rnn':
+                self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                            to_remove=self.inst_column_name,
+                                                            update_idx=False)
+                self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                          to_remove=self.inst_column_num,
+                                                          update_idx=False)
                 # Find the sequence lengths of the data
                 self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
                 # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
@@ -983,6 +979,7 @@ class ModelInterpreter:
             # Save the data used in the model interpretation
             self.bkgnd_data = bkgnd_data
             self.test_data = test_data
+            self.test_labels = test_labels
 
         if instance_importance is True:
             print('Calculating instance importance scores...')
@@ -1016,10 +1013,13 @@ class ModelInterpreter:
             return
 
 
-    def instance_importance_plot(self, orig_data=None, inst_scores=None, id=None,
-                                 pred_prob=None, show_pred_prob=True, labels=None,
-                                 seq_len=None, threshold=0, get_fig_obj=False,
-                                 tensor_idx=True):
+    def instance_importance_plot(self, orig_data=None, inst_scores=None, seq_id=None,
+                                 pred_prob=None, show_pred_prob=True, show_title=True,
+                                 show_colorbar=True, labels=None, seq_len=None, 
+                                 threshold=0, get_fig_obj=False, tensor_idx=True,
+                                 max_seq=10, background_color='white',
+                                 font_family='Roboto', font_size=14,
+                                 font_color='black'):
         '''Create a bar chart that allows visualizing instance importance scores.
 
         Parameters
@@ -1029,15 +1029,23 @@ class ModelInterpreter:
             the true ID corresponding to the plotted sequence.
         inst_scores : numpy.Array, default None
             Array containing the instance importance scores to be plotted.
-        id : int, default None
+        seq_id : int, default None
             ID or sequence index that select which time series / sequences to
             use in the plot. If it's a single value, the method plots a single
+            sequence.
         pred_prob : numpy.Array or torch.Tensor or list of floats, default None
             Array containing the prediction probabilities for each sequence in
             the input data (orig_data). Only relevant if show_pred_prob is True.
         show_pred_prob : bool, default True
-            If set to true, a percentage bar chart will be shown to the right of
-            the standard instance importance plot.
+            If set to True, a percentage bar chart will be shown to the right of
+            the standard instance importance plot. If `pred_prob` isn't
+            specified but the labels are, the prediction probabilities will be
+            automatically calculated.
+        show_title : bool, default True
+            If set to True, the plot will have a title displayed above.
+        show_colorbar : bool, default True
+            If set to True, a bar legend will be shown, corresponding each color
+            to each respective value.
         labels : torch.Tensor, default None
             Labels corresponding to the data used, either specified in the input
             or all the data that the interpreter has.
@@ -1055,6 +1063,20 @@ class ModelInterpreter:
             If set to True, the ID specified in the respective parameter
             constitutes the index where the desired sequence resides. Otherwise,
             it's the actual unique identifier that appears in the original data.
+        max_seq : int, default 10
+            Maximum number of sequences to show in the plot. This is meant to
+            prevent cramming too many sequences into the graph window.
+        background_color : str, default 'white'
+            The plot's background color. Can be set in color name (e.g. 'white'),
+            hexadecimal code (e.g. '#555') or RGB (e.g. 'rgb(0,0,255)').
+        font_family : str, default 'Roboto'
+            Text font family to be used in the numbers shown next to the graph.
+        font_size : int, default 14
+            Text font size to be used in the numbers shown next to the graph.
+        font_color : str, default 'black'
+            Text font color to be used in the numbers shown next to the graph. Can
+            be set in color name (e.g. 'white'), hexadecimal code (e.g. '#555') or
+            GB (e.g. 'rgb(0,0,255)').
 
         Returns
         -------
@@ -1071,7 +1093,6 @@ class ModelInterpreter:
         if inst_scores is None:
             if self.inst_scores is None:
                 raise Exception('ERROR: No instance importance scores found. If the scores aren\'t specified, then they must have already been calculated through the interpret_model method.')
-
             # Use all the previously calculated scores if none were specified
             inst_scores = self.inst_scores
 
@@ -1082,42 +1103,22 @@ class ModelInterpreter:
         elif type(inst_scores) is list:
             inst_scores = np.array(inst_scores)
 
-        if pred_prob is None and show_pred_prob is True:
-            if labels is None:
-                raise Exception('ERROR: By setting show_pred_prob to True, either the prediction probabilities (pred_prob) or the labels must be provided.')
-
-            # Calculate the prediction probabilities for the provided data
-            pred_prob, _ = du.deep_learning.model_inference(self.model, data=(orig_data, labels),
-                                                             metrics=[''], model_type=self.model_type,
-                                                             is_custom=self.is_custom,
-                                                             seq_len_dict=self.seq_len_dict,
-                                                             padding_value=self.padding_value,
-                                                             seq_final_outputs=True,
-                                                             cols_to_remove=[self.id_column_num, self.inst_column_num],
-                                                             already_embedded=self.already_embedded)
-
-        # Convert the prediction probability data into a NumPy array
-        if type(pred_prob) is torch.Tensor:
-            pred_prob = pred_prob.detach().numpy()
-        elif type(pred_prob) is list:
-            pred_prob = np.array(pred_prob)
-
         # if is not tensor_idx:
         # [TODO] Search for the index associated to the specific ID asked for by the user
         # [TODO] Allow to search for multiple indeces and generate a multiple patients time series plot from it
 
-        if len(inst_scores.shape) == 1 or (id is not None and type(id) is not list):
+        if len(inst_scores.shape) == 1 or (seq_id is not None and type(seq_id) is not list):
             # True sequence length of the current id's data
             if seq_len is None:
-                seq_len = self.seq_len_dict[orig_data[id, 0, self.id_column_num].item()]
+                seq_len = self.seq_len_dict[orig_data[seq_id, 0, self.id_column_num].item()]
 
             # [TODO] Add a prediction probability bar plot like in the multiple sequences case
 
             # Plot the instance importance of one sequence
             plot_data = [go.Bar(
                             x = list(range(seq_len)),
-                            y = inst_scores[id, :seq_len],
-                            marker=dict(color=du.utils.set_bar_color(inst_scores, id, seq_len,
+                            y = inst_scores[seq_id, :seq_len],
+                            marker=dict(color=du.utils.set_bar_color(inst_scores, seq_id, seq_len,
                                                                      threshold=threshold,
                                                                      pos_color=POS_COLOR,
                                                                      neg_color=NEG_COLOR))
@@ -1128,33 +1129,25 @@ class ModelInterpreter:
                                 yaxis=dict(title='Importance scores')
                               )
         else:
-            if id is None:
+            if seq_id is None:
                 # Use all the sequences data if a subset isn't specified
-                id = list(range(inst_scores.shape[0]))
-
+                seq_id = list(range(inst_scores.shape[0]))
             # Select the desired data according to the specified IDs
-            inst_scores = inst_scores[id, :]
-            orig_data = orig_data[id, :, :]
-            pred_prob = pred_prob[id]
-
+            inst_scores = inst_scores[seq_id, :]
+            orig_data = orig_data[seq_id, :, :]
             # Unique patient ids in string format
             patients = [str(int(item)) for item in [tensor.item()
                         for tensor in list(orig_data[:, 0, self.id_column_num])]]
-
             # Sequence instances count, used as X in the plot
             seq_insts_x = [list(range(inst_scores.shape[1]))
                            for patient in range(len(patients))]
-
             # Patients ids repeated max sequence length times, used as Y in the plot
             patients_y = [[patient]*inst_scores.shape[1] for patient in list(patients)]
-
             # Flatten seq_insts and patients_y
             seq_insts_x = list(np.array(seq_insts_x).flatten())
             patients_y = list(np.array(patients_y).flatten())
-
             # Define colors for the data points based on their normalized scores (from 0 to 1 instead of -1 to 1)
             colors = [val for val in inst_scores.flatten()]
-
             # Count the number of already deleted paddings
             count = 0
 
@@ -1165,126 +1158,151 @@ class ModelInterpreter:
                         del seq_insts_x[i*inst_scores.shape[1]+j-count]
                         del patients_y[i*inst_scores.shape[1]+j-count]
                         del colors[i*inst_scores.shape[1]+j-count]
-
                         # Increment the counting of already deleted items
                         count += 1
 
-            # Colors to use in the prediction probability bar plots
-            pred_colors = cl.scales['8']['div']['RdYlGn']
+            if show_pred_prob is True:
+                if pred_prob is None:
+                    if labels is None:
+                        raise Exception('ERROR: By setting `show_pred_prob` to True, either the prediction probabilities (pred_prob) or the labels must be provided.')
+                    # Calculate the prediction probabilities for the provided data
+                    pred_prob, _ = du.deep_learning.model_inference(self.model, data=(orig_data, labels),
+                                                                    metrics=[''], model_type=self.model_type,
+                                                                    is_custom=self.is_custom,
+                                                                    seq_len_dict=self.seq_len_dict,
+                                                                    padding_value=self.padding_value,
+                                                                    output_rounded=False,
+                                                                    seq_final_outputs=True,
+                                                                    cols_to_remove=[self.id_column_num, self.inst_column_num],
+                                                                    already_embedded=self.already_embedded)
+                # Convert the prediction probability data into a NumPy array
+                if type(pred_prob) is torch.Tensor:
+                    pred_prob = pred_prob.detach().numpy()
+                elif type(pred_prob) is list:
+                    pred_prob = np.array(pred_prob)
+                # Select the desired data according to the specified IDs
+                pred_prob = pred_prob[seq_id]
+                # Colors to use in the prediction probability bar plots
+                pred_colors = cl.scales['8']['div']['RdYlGn']
+                # Create "percentage bar" plots through pairs of unfilled and filled rectangles
+                shapes_list = []
+                # Starting y coordinate of the first shape
+                y0 = -0.25
+                # Height of the shapes (y length)
+                step = 0.5
+                # Maximum width of the shapes
+                max_width = 1
+                for i in range(len(patients)):
+                    # Set the starting x coordinate to after the last data point
+                    x0 = inst_scores.shape[1]
+                    # Set the filling length of the shape
+                    x1_fill = x0 + pred_prob[i] * max_width
+                    shape_unfilled = {
+                                        'type': 'rect',
+                                        'x0': x0,
+                                        'y0': y0,
+                                        'x1': x0 + max_width,
+                                        'y1': y0 + step,
+                                        'line': {
+                                                    'color': 'rgba(0, 0, 0, 1)',
+                                                    'width': 2,
+                                                },
+                                    }
+                    shape_filled = {
+                                        'type': 'rect',
+                                        'x0': x0,
+                                        'y0': y0,
+                                        'x1': x1_fill,
+                                        'y1': y0 + step,
+                                        'fillcolor': pred_colors[int(len(pred_colors)-1-max(pred_prob[i]*len(pred_colors)-1, 0))]
+                                    }
+                    shapes_list.append(shape_unfilled)
+                    shapes_list.append(shape_filled)
+                    # Set the starting y coordinate for the next shapes
+                    y0 = y0 + 2 * step
 
-            # Create "percentage bar" plots through pairs of unfilled and filled rectangles
-            shapes_list = []
-
-            # Starting y coordinate of the first shape
-            y0 = -0.25
-
-            # Height of the shapes (y length)
-            step = 0.5
-
-            # Maximum width of the shapes
-            max_width = 1
-
-            for i in range(len(patients)):
-                # Set the starting x coordinate to after the last data point
-                x0 = inst_scores.shape[1]
-
-                # Set the filling length of the shape
-                x1_fill = x0 + pred_prob[i] * max_width
-
-                shape_unfilled = {
-                                    'type': 'rect',
-                                    'x0': x0,
-                                    'y0': y0,
-                                    'x1': x0 + max_width,
-                                    'y1': y0 + step,
-                                    'line': {
-                                                'color': 'rgba(0, 0, 0, 1)',
-                                                'width': 2,
-                                            },
-                                 }
-
-                shape_filled = {
-                                    'type': 'rect',
-                                    'x0': x0,
-                                    'y0': y0,
-                                    'x1': x1_fill,
-                                    'y1': y0 + step,
-                                    'fillcolor': pred_colors[int(len(pred_colors)-1-max(pred_prob[i]*len(pred_colors)-1, 0))]
-                                 }
-                shapes_list.append(shape_unfilled)
-                shapes_list.append(shape_filled)
-
-                # Set the starting y coordinate for the next shapes
-                y0 = y0 + 2 * step
-
-            # Getting points along the percentage bar plots
-            x_range = [list(np.array(range(0, 10, 1))*0.1+inst_scores.shape[1]) for idx in range(len(patients))]
-
-            # Flatten the list
-            text_x = [item for sublist in x_range for item in sublist]
-
-            # Y coordinates of the prediction probability text
-            text_y = [patient for patient in patients for idx in range(10)]
-
-            # Prediction probabilities in text form, to appear in the plot
-            text_content = [pred_prob[idx] for idx in range(len(pred_prob)) for i in range(10)]
-
-            # [TODO] Ajdust the zoom so that the initial plot doens't block part of the first and last sequences that show up
+                # Getting points along the percentage bar plots
+                x_range = [list(np.array(range(0, 10, 1))*0.1+inst_scores.shape[1]) for idx in range(len(patients))]
+                # Flatten the list
+                text_x = [item for sublist in x_range for item in sublist]
+                # Y coordinates of the prediction probability text
+                text_y = [patient for patient in patients for idx in range(10)]
+                # Prediction probabilities in text form, to appear in the plot
+                text_content = [pred_prob[idx] for idx in range(len(pred_prob)) for i in range(10)]
+                # [TODO] Ajdust the zoom so that the initial plot doens't block part of the first and last sequences that show up
 
             # Create plotly chart
-            plot_data = [{"x": seq_insts_x,
-                          "y": patients_y,
-                          "marker": dict(color=colors, size=12,
-                                         line = dict(
-                                                      color = 'black',
-                                                      width = 1
-                                                    ),
-                                         colorbar=dict(title='Scores'),
-                                         colorscale=[[0, 'rgba(30,136,229,1)'], [0.5, 'white'], [1, 'rgba(255,13,87,1)']],
-                                         cmax=1,
-                                         cmin=-1),
-                          "mode": "markers",
-                          "type": "scatter",
-                          "hoverinfo": 'x+y'
-                         },
-                         go.Scatter(
-                                     x=text_x,
-                                     y=text_y,
-                                     text=text_content,
-                                     mode='text',
-                                     textfont=dict(size = 1, color='#ffffff'),
-                                     hoverinfo='y+text'
-                         )]
-            layout = go.Layout(
-                                title="Patients time series",
-                                xaxis=dict(
-                                            title="Instance",
-                                            showgrid=False,
-                                            zeroline=False
-                                          ),
-                                yaxis=dict(
-                                            title="Patient ID",
-                                            showgrid=False,
-                                            zeroline=False,
-                                            type='category'
-                                          ),
-                                hovermode="closest",
-                                shapes=shapes_list,
-                                showlegend=False
+            plot_data = [dict(
+                x=seq_insts_x,
+                y=patients_y,
+                marker=dict(
+                    color=colors,
+                    size=12,
+                    line = dict(
+                        color = 'black',
+                        width = 1
+                    ),
+                    colorscale=[[0, 'rgba(30,136,229,1)'], [0.5, 'white'], [1, 'rgba(255,13,87,1)']],
+                    cmax=1,
+                    cmin=-1,
+                ),
+                mode='markers',
+                type='scatter',
+                hoverinfo='x+y'
+            )]
+            layout = dict(
+                paper_bgcolor=background_color,
+                plot_bgcolor=background_color,
+                font=dict(
+                    family=font_family,
+                    size=font_size,
+                    color=font_color
+                ),
+                xaxis=dict(
+                    title='Instance',
+                    showgrid=False,
+                    zeroline=False
+                ),
+                yaxis=dict(
+                    title='Patient ID',
+                    showgrid=False,
+                    zeroline=False,
+                    type='category'
+                ),
+                hovermode='closest',
+                showlegend=False
             )
-
-            if len(patients) > 10:
+            if show_title is True:
+                layout.title = 'Instance importance'
+                layout['margin'] = dict(l=0, r=0, t=30, b=0, pad=0)
+            else:
+                layout['margin'] = dict(l=0, r=0, t=0, b=0, pad=0)
+            if show_colorbar is True:
+                layout['colorbar'] = dict(title='Scores')
+            if show_pred_prob is True:
+                # Add hover text to indicate the final output probabilities
+                prob_hover_info = go.Scatter(
+                    x=text_x,
+                    y=text_y,
+                    text=text_content,
+                    mode='text',
+                    textfont=dict(size = 1, color='#ffffff'),
+                    hoverinfo='y+text'
+                )
+                plot_data.append(prob_hover_info)
+                # Add final output probabilities bar plots
+                layout.shapes = shapes_list
+            if len(patients) > max_seq:
                 # Prevent cramming too many sequences into the plot
-                layout.yaxis.range = [patients[-10], patients[-1]]
-
+                layout['yaxis']['range'] = [patients[-max_seq], patients[-1]]
         # Show the plot
         fig = go.Figure(plot_data, layout)
-        py.iplot(fig)
 
         if get_fig_obj:
             # Only return the figure object if specified by the user
             return fig
         else:
+            py.iplot(fig)
             return
 
     # [TODO] Develop function to explain, in text form, why a given input data has a certain output.
