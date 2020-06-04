@@ -1014,9 +1014,11 @@ class ModelInterpreter:
 
 
     def instance_importance_plot(self, orig_data=None, inst_scores=None, seq_id=None,
-                                 pred_prob=None, show_pred_prob=True, show_title=True,
-                                 show_colorbar=True, labels=None, seq_len=None, 
-                                 threshold=0, get_fig_obj=False, tensor_idx=True,
+                                 pred_prob=None, uniform_spacing=False, 
+                                 show_pred_prob=True, show_title=True,
+                                 show_colorbar=True, click_mode='event+select',
+                                 labels=None, seq_len=None, threshold=0, 
+                                 get_fig_obj=False, tensor_idx=True,
                                  max_seq=10, background_color='white',
                                  font_family='Roboto', font_size=14,
                                  font_color='black'):
@@ -1036,6 +1038,9 @@ class ModelInterpreter:
         pred_prob : numpy.Array or torch.Tensor or list of floats, default None
             Array containing the prediction probabilities for each sequence in
             the input data (orig_data). Only relevant if show_pred_prob is True.
+        uniform_spacing : bool, default False
+            Defines whether or not the sequences are displayed with uniform
+            spacing (i.e. fixed distance) between their samples.
         show_pred_prob : bool, default True
             If set to True, a percentage bar chart will be shown to the right of
             the standard instance importance plot. If `pred_prob` isn't
@@ -1046,6 +1051,19 @@ class ModelInterpreter:
         show_colorbar : bool, default True
             If set to True, a bar legend will be shown, corresponding each color
             to each respective value.
+        click_mode : string, default 'event+select'
+            Determines the mode of single click interactions. "event" is the 
+            default value and emits the `plotly_click` event. In addition this 
+            mode emits the `plotly_selected` event in drag modes "lasso" and 
+            "select", but with no event data attached (kept for compatibility 
+            reasons). The "select" flag enables selecting single data points via 
+            click. This mode also supports persistent selections, meaning that 
+            pressing Shift while clicking, adds to / subtracts from an existing 
+            selection. "select" with `hovermode`: "x" can be confusing, consider 
+            explicitly setting `hovermode`: "closest" when using this feature. 
+            Selection events are sent accordingly as long as "event" flag is set 
+            as well. When the "event" flag is missing, `plotly_click` and 
+            `plotly_selected` events are not fired.
         labels : torch.Tensor, default None
             Labels corresponding to the data used, either specified in the input
             or all the data that the interpreter has.
@@ -1135,12 +1153,18 @@ class ModelInterpreter:
             # Select the desired data according to the specified IDs
             inst_scores = inst_scores[seq_id, :]
             orig_data = orig_data[seq_id, :, :]
-            # Unique patient ids in string format
+            # Unique patient IDs in string format
             patients = [str(int(item)) for item in [tensor.item()
                         for tensor in list(orig_data[:, 0, self.id_column_num])]]
-            # Sequence instances count, used as X in the plot
-            seq_insts_x = [list(range(inst_scores.shape[1]))
-                           for patient in range(len(patients))]
+            if uniform_spacing is True:
+                # Sequence instances count, used as X in the plot
+                seq_insts_x = [list(range(inst_scores.shape[1]))
+                               for patient in range(len(patients))]
+            else:
+                # Use the original timestamp values as the X axis
+                seq_insts_x = [int(tensor) for seq_list
+                               in [list(ts_array) for ts_array in list(orig_data[:, :, self.inst_column_num])]
+                               for tensor in seq_list]
             # Patients ids repeated max sequence length times, used as Y in the plot
             patients_y = [[patient]*inst_scores.shape[1] for patient in list(patients)]
             # Flatten seq_insts and patients_y
@@ -1270,7 +1294,8 @@ class ModelInterpreter:
                     type='category'
                 ),
                 hovermode='closest',
-                showlegend=False
+                showlegend=False,
+                clickmode=click_mode
             )
             if show_title is True:
                 layout.title = 'Instance importance'
