@@ -679,7 +679,7 @@ class ModelInterpreter:
     def feature_importance(self, test_data=None, model_type=None,
                            method='shap', fast_calc=None, see_progress=True,
                            bkgnd_data=None, max_iter=100, l1_coeff=0, lr=0.001,
-                           recur_layer=None, debug_loss=False):
+                           recur_layer=None, create_new_explainer=True, debug_loss=False):
         '''Calculate the feature importance scores to interpret the impact
         of each feature in each instance's output.
 
@@ -728,6 +728,9 @@ class ModelInterpreter:
             Pointer to the recurrent layer in the model, if it exists. It should
             either be a LSTM, GRU or RNN network. If none is specified, the
             method will automatically search for a recurrent layer in the model.
+        create_new_explainer : bool, default True
+            Sets if we'll create a new SHAP KernelExplainer or if we'll use a
+            previously defined one in the current model interpreter object.
         debug_loss : bool, default False
             Debugging flag, which makes the method also return an array of the
             mask filter optimization loss.
@@ -761,45 +764,47 @@ class ModelInterpreter:
         isRNN = model_type == 'multivariate_rnn'
 
         if method.lower() == 'shap':
-            if fast_calc:
-                print(f'Attention: you have chosen to interpret the model using SHAP, with one background sample (all zeros), with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
-                print('Evaluating the model with a reference value of zero. This should only be done if all the data is processed in a way that, for categorical features, 0 represents missing attribute and, for continuous features, 0 represents the average value of that feature.')
-                # Use a single all zeroes sample as a reference value
-                num_id_features = sum([1 if i is not None else 0 for i in [self.id_column_num, self.inst_column_num]])
-                bkgnd_data = np.zeros((1, len(self.feat_names) + num_id_features))
-            else:
-                print(f'Attention: you have chosen to interpret the model using SHAP, with {bkgnd_data.shape[0]} background samples, with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
+            if create_new_explainer is True:
+                # Go through all of the steps of initialiazing a new SHAP KernelExplainer
+                if fast_calc:
+                    print(f'Attention: you have chosen to interpret the model using SHAP, with one background sample (all zeros), with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
+                    print('Evaluating the model with a reference value of zero. This should only be done if all the data is processed in a way that, for categorical features, 0 represents missing attribute and, for continuous features, 0 represents the average value of that feature.')
+                    # Use a single all zeroes sample as a reference value
+                    num_id_features = sum([1 if i is not None else 0 for i in [self.id_column_num, self.inst_column_num]])
+                    bkgnd_data = np.zeros((1, len(self.feat_names) + num_id_features))
+                else:
+                    print(f'Attention: you have chosen to interpret the model using SHAP, with {bkgnd_data.shape[0]} background samples, with {self.SHAP_bkgnd_samples} reevalutions per prediction applied to {test_data.shape[0]} test samples. This might take a while. Depending on your computer\'s processing power, you should do a coffee break or even go to sleep!')
+                    if model_type.lower() == 'multivariate_rnn':
+                        # Sort the background data by sequence length
+                        bkgnd_data, x_lengths_bkgnd = du.padding.sort_by_seq_len(bkgnd_data, self.seq_len_dict)
+                        # Convert the background data into a 2D NumPy matrix
+                        bkgnd_data = du.deep_learning.ts_tensor_to_np_matrix(bkgnd_data, self.feat_num, self.padding_value)
+                    elif model_type.lower() == 'mlp':
+                        # Just convert background data into a NumPy matrix
+                        bkgnd_data = bkgnd_data.numpy()
                 if model_type.lower() == 'multivariate_rnn':
-                    # Sort the background data by sequence length
-                    bkgnd_data, x_lengths_bkgnd = du.padding.sort_by_seq_len(bkgnd_data, self.seq_len_dict)
-                    # Convert the background data into a 2D NumPy matrix
-                    bkgnd_data = du.deep_learning.ts_tensor_to_np_matrix(bkgnd_data, self.feat_num, self.padding_value)
+                    # Convert the test data into a 2D NumPy matrix
+                    test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
                 elif model_type.lower() == 'mlp':
-                    # Just convert background data into a NumPy matrix
-                    bkgnd_data = bkgnd_data.numpy()
-            if model_type.lower() == 'multivariate_rnn':
-                # Convert the test data into a 2D NumPy matrix
-                test_data = du.deep_learning.ts_tensor_to_np_matrix(test_data, self.feat_num, self.padding_value)
-            elif model_type.lower() == 'mlp':
-                # Remove ID columns from the data
-                bkgnd_data = du.deep_learning.remove_tensor_column(bkgnd_data, [self.id_column_num, self.inst_column_num], inplace=True)
-                test_data = du.deep_learning.remove_tensor_column(test_data, [self.id_column_num, self.inst_column_num], inplace=True)
-                # Convert test data into a NumPy matrix
-                test_data = test_data.numpy()
-            # Create a function that represents the model's feedforward operation on a single instance
-            kf = KernelFunction(self.model, model_type=model_type)
-            # Use the background dataset to integrate over
-            print('Creating a SHAP kernel explainer...')
-            if self.is_custom is False:
-                # Let SHAP find the recurrent layer
-                recur_layer = None
-            else:
-                # When using custom models, the whole model behaves as a recurrent layer
-                # We just need to make sure that it returns the hidden state
-                recur_layer = partial(self.model.forward, get_hidden_state=True)
-            self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
-                                                  id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
-                                                  recur_layer=recur_layer)
+                    # Remove ID columns from the data
+                    bkgnd_data = du.deep_learning.remove_tensor_column(bkgnd_data, [self.id_column_num, self.inst_column_num], inplace=True)
+                    test_data = du.deep_learning.remove_tensor_column(test_data, [self.id_column_num, self.inst_column_num], inplace=True)
+                    # Convert test data into a NumPy matrix
+                    test_data = test_data.numpy()
+                # Create a function that represents the model's feedforward operation on a single instance
+                kf = KernelFunction(self.model, model_type=model_type)
+                # Use the background dataset to integrate over
+                print('Creating a SHAP kernel explainer...')
+                if self.is_custom is False:
+                    # Let SHAP find the recurrent layer
+                    recur_layer = None
+                else:
+                    # When using custom models, the whole model behaves as a recurrent layer
+                    # We just need to make sure that it returns the hidden state
+                    recur_layer = partial(self.model.forward, get_hidden_state=True)
+                self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
+                                                    id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
+                                                    recur_layer=recur_layer)
             # Count the time that takes to calculate the SHAP values
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
@@ -831,8 +836,8 @@ class ModelInterpreter:
     def interpret_model(self, bkgnd_data=None, test_data=None, test_labels=None,
                         new_data=False, model_type=None, df=None,
                         instance_importance=True, feature_importance=False,
-                        fast_calc=None, see_progress=True, save_data=True,
-                        debug_loss=False):
+                        fast_calc=None, create_new_explainer=True,
+                        see_progress=True, save_data=True, debug_loss=False):
         '''Method to calculate scores of feature and/or instance importance, in
         order to be able to interpret a model on a given data.
 
@@ -885,6 +890,9 @@ class ModelInterpreter:
             more time in order to get a more precise and truthful
             interpretation of the model's behavior, requiring longer
             computation times.
+        create_new_explainer : bool, default True
+            Sets if we'll create a new SHAP KernelExplainer or if we'll use a
+            previously defined one in the current model interpreter object.
         see_progress : bool, default True
             If set to True, a progress bar will show up indicating the execution
             of the instance importance scores calculations.
@@ -990,9 +998,15 @@ class ModelInterpreter:
             print('Calculating feature importance scores...')
             # Calculate the scores of importance of each feature in each instance
             if feature_importance == 'mask filter' and debug_loss:
-                self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=True)
+                self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type, 
+                                                                     feature_importance, 
+                                                                     fast_calc, see_progress, 
+                                                                     bkgnd_data, debug_loss=True)
             else:
-                self.feat_scores = self.feature_importance(test_data, model_type, feature_importance, fast_calc, see_progress, bkgnd_data, debug_loss=False)
+                self.feat_scores = self.feature_importance(test_data, model_type, feature_importance,  
+                                                           fast_calc, see_progress, bkgnd_data, 
+                                                           create_new_explainer=create_new_explainer, 
+                                                           debug_loss=False)
 
         print('Done!')
 
