@@ -470,7 +470,7 @@ pyyaml = "*"
 redis = ">=3.3.2,<3.5.0"
 
 [package.extras]
-all = ["gym", "blist", "uvicorn", "lz4", "opencv-python-headless", "gpustat", "flask", "tabulate", "tensorboardx", "msgpack (>=0.6.2)", "scipy", "dm-tree", "pandas", "requests", "atari-py", "pyyaml"]
+all = ["opencv-python-headless", "pyyaml", "atari-py", "tabulate", "lz4", "flask", "pandas", "requests", "gpustat", "tensorboardx", "uvicorn", "gym", "msgpack (>=0.6.2)", "blist", "scipy", "dm-tree"]
 dashboard = ["requests", "gpustat"]
 rllib = ["tabulate", "tensorboardx", "pandas", "atari-py", "dm-tree", "gym", "lz4", "opencv-python-headless", "pyyaml", "scipy"]
 serve = ["uvicorn", "flask", "blist"]
@@ -480,7 +480,7 @@ tune = ["tabulate", "tensorboardx", "pandas"]
 [package.source]
 reference = ""
 type = "url"
-url = "https://ray-wheels.s3-us-west-2.amazonaws.com/master/ddb9368f2c57bf18536f72bcd636ed876fe2c0db/ray-0.9.0.dev0-cp37-cp37m-macosx_10_13_intel.whl"
+url = "https://ray-wheels.s3-us-west-2.amazonaws.com/master/ddb9368f2c57bf18536f72bcd636ed876fe2c0db/ray-0.9.0.dev0-cp37-cp37m-manylinux1_x86_64.whl"
 [[package]]
 category = "main"
 description = "Python client for Redis key-value store"
@@ -662,7 +662,7 @@ idna = ">=2.0"
 multidict = ">=4.0"
 
 [metadata]
-content-hash = "133a2a315c885b7f21afc97b1a1e445a21b214935bca6868967125da917f07c2"
+content-hash = "3802075d203c2c9915ad2ce5081094dc6bdd2bb6b8f13b4d0dfdae058352f0ea"
 python-versions = "^3.6.1"
 
 [metadata.files]
