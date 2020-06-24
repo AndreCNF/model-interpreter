@@ -155,7 +155,7 @@ class KernelFunction:
             return output.detach().numpy()
 
 class ModelInterpreter:
-    def __init__(self, model, data, labels=None, model_type='multivariate_rnn',
+    def __init__(self, model, data=None, labels=None, model_type='multivariate_rnn',
                  is_custom=False, already_embedded=False, seq_len_dict=None,
                  id_column=0, inst_column=None, label_column=None, fast_calc=True,
                  SHAP_bkgnd_samples=1000, random_seed=42, feat_names=None,
@@ -171,7 +171,7 @@ class ModelInterpreter:
         ----------
         model : nn.Module
             Machine learning model which will be interpreted.
-        data : torch.Tensor or pandas.DataFrame
+        data : torch.Tensor or pandas.DataFrame, default None
             Data used in the interpretation, either directly by analyzing the
             outputs obtained with each sample or indireclty by using as
             background data in methods such as SHAP explainers. The data will be
@@ -202,7 +202,7 @@ class ModelInterpreter:
         inst_column : int, default None
             Number of the column which corresponds to the instance or timestamp
             identifier in the data tensor.
-        label_column_num : int, default None
+        label_column : int, default None
             Number of the column which corresponds to the label in the data
             tensor. Only needed if the data is in dataframe format.
         fast_calc : bool, default True
@@ -236,6 +236,7 @@ class ModelInterpreter:
         '''
         # Initialize parameters according to user input
         self.model = model
+        self.data = data
         self.seq_len_dict = seq_len_dict
         self.id_column_num = id_column
         self.inst_column_num = inst_column
@@ -256,50 +257,99 @@ class ModelInterpreter:
         # Put the model in evaluation mode to deactivate dropout
         self.model.eval()
 
-        if type(data) is torch.Tensor:
-            self.data = data
-            self.labels = labels
-            if model_type == 'mlp':
-                self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
-        elif type(data) is np.ndarray:
-            # Convert from numpy to pytorch
-            self.data = torch.from_numpy(data)
-            self.labels = torch.from_numpy(labels)
-            if model_type == 'mlp':
-                self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
-        elif type(data) is pd.DataFrame:
-            # Fetch the column names, ignoring the ID column
-            self.feat_names = list(data.columns)
+        if data is not None:
+            if type(data) is torch.Tensor:
+                self.data = data
+                self.labels = labels
+                if model_type == 'mlp':
+                    self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
+            elif type(data) is np.ndarray:
+                # Convert from numpy to pytorch
+                self.data = torch.from_numpy(data)
+                self.labels = torch.from_numpy(labels)
+                if model_type == 'mlp':
+                    self.data = du.deep_learning.remove_tensor_column(data, id_column, inplace=True)
+            elif type(data) is pd.DataFrame:
+                # Fetch the column names, ignoring the ID column
+                self.feat_names = list(data.columns)
+                # Convert the column indeces to the column names
+                self.id_column_name = self.feat_names[self.id_column_num]
+                self.inst_column_name = self.feat_names[self.inst_column_num]
+                if self.label_column_num is None:
+                    # Counter that indicates in which column we're in when searching for the label column
+                    col_num = 0
+                    for col in data.columns:
+                        if 'label' in col:
+                            # Column name corresponding to the label
+                            self.label_column_name = col
+                            # Column number corresponding to the label
+                            self.label_column_num = col_num
+                            break
+                        col_num += 1
+                if self.label_column_name is None:
+                    self.label_column_name = self.feat_names[self.label_column_num]
+                self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                            to_remove=[self.id_column_name,
+                                                                    self.label_column_name],
+                                                            update_idx=False)
+                # Fetch the column numbers, ignoring the ID column
+                self.feat_num = list(range(len(data.columns)))
+                self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                          to_remove=self.id_column_num,
+                                                          update_idx=False)
+                # Also update the idx when removing the label, since the features
+                # tensors aren't going to contain the label
+                self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                        to_remove=self.label_column_num,
+                                                        update_idx=True)
+                if self.model_type == 'multivariate_rnn':
+                    # Also ignore the instance ID column
+                    self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                                to_remove=self.inst_column_name,
+                                                                update_idx=False)
+                    self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                            to_remove=self.inst_column_num,
+                                                            update_idx=False)
+                    # Find the sequence lengths of the data
+                    self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
+                    # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
+                    data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
+                                                                        ts_column=self.inst_column_name, padding_value=padding_value,
+                                                                        inplace=True)
+                    # Separate labels from features
+                    dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
+                                                              seq_len_dict=self.seq_len_dict)
+                elif self.model_type == 'mlp':
+                    # Convert into a PyTorch tensor
+                    data_tensor = torch.from_numpy(data.numpy())
+                    # Separate labels from features
+                    dataset = du.datasets.Tabular_Dataset(data_tensor, data)
+
+                self.data = dataset.X
+                self.labels = dataset.y
+            else:
+                raise Exception('ERROR: Invalid data type. Please provide data in a Pandas DataFrame, PyTorch Tensor or NumPy Array format.')
+        else:
             # Convert the column indeces to the column names
             self.id_column_name = self.feat_names[self.id_column_num]
             self.inst_column_name = self.feat_names[self.inst_column_num]
-            if self.label_column_num is None:
-                # Counter that indicates in which column we're in when searching for the label column
-                col_num = 0
-                for col in data.columns:
-                    if 'label' in col:
-                        # Column name corresponding to the label
-                        self.label_column_name = col
-                        # Column number corresponding to the label
-                        self.label_column_num = col_num
-                        break
-                    col_num += 1
-            if self.label_column_name is None:
-                self.label_column_name = self.feat_names[self.label_column_num]
-            self.feat_names = du.utils.remove_from_list(self.feat_names,
-                                                        to_remove=[self.id_column_name,
-                                                                   self.label_column_name],
-                                                        update_idx=False)
             # Fetch the column numbers, ignoring the ID column
-            self.feat_num = list(range(len(data.columns)))
+            self.feat_num = list(range(len(self.feat_names)))
             self.feat_num = du.utils.remove_from_list(self.feat_num,
                                                       to_remove=self.id_column_num,
                                                       update_idx=False)
-            # Also update the idx when removing the label, since the features
-            # tensors aren't going to contain the label
-            self.feat_num = du.utils.remove_from_list(self.feat_num,
-                                                      to_remove=self.label_column_num,
-                                                      update_idx=True)
+            self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                        to_remove=self.id_column_name,
+                                                        update_idx=False)
+            if self.label_column_num is not None:
+                # Also update the idx when removing the label, since the features
+                # tensors aren't going to contain the label
+                self.feat_names = du.utils.remove_from_list(self.feat_names,
+                                                            to_remove=self.label_column_name,
+                                                            update_idx=False)
+                self.feat_num = du.utils.remove_from_list(self.feat_num,
+                                                        to_remove=self.label_column_num,
+                                                        update_idx=True)
             if self.model_type == 'multivariate_rnn':
                 # Also ignore the instance ID column
                 self.feat_names = du.utils.remove_from_list(self.feat_names,
@@ -308,25 +358,6 @@ class ModelInterpreter:
                 self.feat_num = du.utils.remove_from_list(self.feat_num,
                                                           to_remove=self.inst_column_num,
                                                           update_idx=False)
-                # Find the sequence lengths of the data
-                self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
-                # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
-                data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
-                                                                    ts_column=self.inst_column_name, padding_value=padding_value,
-                                                                    inplace=True)
-                # Separate labels from features
-                dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
-                                                          seq_len_dict=self.seq_len_dict)
-            elif self.model_type == 'mlp':
-                # Convert into a PyTorch tensor
-                data_tensor = torch.from_numpy(data.numpy())
-                # Separate labels from features
-                dataset = du.datasets.Tabular_Dataset(data_tensor, data)
-
-            self.data = dataset.X
-            self.labels = dataset.y
-        else:
-            raise Exception('ERROR: Invalid data type. Please provide data in a Pandas DataFrame, PyTorch Tensor or NumPy Array format.')
 
         # Declare explainer attribute which will store the SHAP DEEP Explainer object
         self.explainer = None
@@ -803,8 +834,8 @@ class ModelInterpreter:
                     # We just need to make sure that it returns the hidden state
                     recur_layer = partial(self.model.forward, get_hidden_state=True)
                 self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
-                                                    id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
-                                                    recur_layer=recur_layer)
+                                                      id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
+                                                      recur_layer=recur_layer)
             # Count the time that takes to calculate the SHAP values
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
