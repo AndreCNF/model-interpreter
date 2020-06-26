@@ -17,7 +17,7 @@ pdoc3 = "^0.7.2"
 everett = "^1.0"
 comet-ml = "^3.1.2"
 pillow = "^7.0.0"
-comet_ml = "^3.1.10"
+comet_ml = "^3.1.12"
 
 [tool.poetry.dev-dependencies]
 

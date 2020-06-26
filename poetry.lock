@@ -58,7 +58,7 @@ description = "Supercharging Machine Learning"
 name = "comet-ml"
 optional = false
 python-versions = "*"
-version = "3.1.10"
+version = "3.1.12"
 
 [package.dependencies]
 comet-git-pure = ">=0.19.11"
@@ -399,7 +399,7 @@ python-versions = ">=2.7"
 version = "1.0.3"
 
 [metadata]
-content-hash = "3b0c7875048ba61bbab7b0f384d1079c37db9dd16987cc1172e04d163f590cb6"
+content-hash = "574071cf69db4a25dbebec9b3844d16353f88dcb4b537e51ed392b854b0e0a2e"
 python-versions = "^3.6.1"
 
 [metadata.files]
@@ -424,8 +424,8 @@ comet-git-pure = [
     {file = "comet_git_pure-0.19.11-py3-none-any.whl", hash = "sha256:b3a739ef67e6bcd9f15a93ea557794eda63680859c987718f6ca423b01cb7919"},
 ]
 comet-ml = [
-    {file = "comet_ml-3.1.10-py2.py3-none-any.whl", hash = "sha256:6750ddb7ee974230fd71a788eecc7c7e2ba2fe2b924866bbc50812a1f6a1d0c9"},
-    {file = "comet_ml-3.1.10.tar.gz", hash = "sha256:f12026bb4fd10da0101af9f7dbebff55b93b66bfe37754fd0c3711a14159eefd"},
+    {file = "comet_ml-3.1.12-py2.py3-none-any.whl", hash = "sha256:636fdf8021bb4e0f124bbdae4475afa8b878a1603c88c172e0cc50e8551996ad"},
+    {file = "comet_ml-3.1.12.tar.gz", hash = "sha256:4cc7e626af23c082e4697c3119b2a8a5ddf77eb7d78b083d4eaa861622bac5d0"},
 ]
 everett = [
     {file = "everett-1.0.2-py2.py3-none-any.whl", hash = "sha256:8a5ee8cdde0ed6b3bbb63249e0e0703d4ad91921107ff198e0868ffce5f7b6bc"},
