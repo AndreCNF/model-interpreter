@@ -1394,3 +1394,26 @@ class ModelInterpreter:
     # [TODO] Define an automatic method to discover which embedded category was more
     # important by doing inference on individual embeddings of each category separately,
     # seeing which one caused a bigger change in the output.
+
+    def shap_values_df(self):
+        '''Create a dataframe that contains both the original data used in the 
+        interpretation of the model and the resulting SHAP values.
+
+        Returns
+        -------
+        data_n_shap_df : pandas.DataFrame
+            Dataframe that contains both the original data used in the 
+            interpretation of the model and the resulting SHAP values.'''
+        # Join the original data and the features' SHAP values
+        data_n_shap = np.concatenate([self.test_data.numpy(), self.test_labels.unsqueeze(2).numpy(), self.feat_scores], axis=2)
+        # Reshape into a 2D format
+        data_n_shap = data_n_shap.reshape(-1, data_n_shap.shape[-1])
+        # Remove padding samples
+        data_n_shap = data_n_shap[[self.padding_value not in row for row in data_n_shap]]
+        # Define the column names list
+        shap_column_names = [f'{feature}_shap' for feature in self.feat_names]
+        column_names = ([self.id_column_name] + [self.inst_column_name] + self.feat_names
+                        + [self.label_column_name] + shap_column_names)
+        # Create the dataframe
+        data_n_shap_df = pd.DataFrame(data=data_n_shap, columns=column_names)
+        return data_n_shap_df
