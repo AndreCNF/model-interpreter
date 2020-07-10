@@ -159,7 +159,7 @@ class ModelInterpreter:
                  is_custom=False, already_embedded=False, seq_len_dict=None,
                  id_column=0, inst_column=None, label_column=None, fast_calc=True,
                  SHAP_bkgnd_samples=1000, random_seed=42, feat_names=None,
-                 padding_value=999999, occlusion_wgt=0.7):
+                 padding_value=999999, occlusion_wgt=0.7, total_length=None):
         '''A machine learning model interpreter which calculates instance and
         feature importance.
 
@@ -233,6 +233,9 @@ class ModelInterpreter:
             where 0 corresponds to not using the occlusion component at all, 0.5
             is a normal, unweighted average and 1 deactivates the use of the
             output variation part.
+        total_length : int, default None
+            If not None, the feature importance scores will be padded to have 
+            length total_length.
         '''
         # Initialize parameters according to user input
         self.model = model
@@ -247,6 +250,7 @@ class ModelInterpreter:
         self.feat_names = feat_names
         self.padding_value = padding_value
         self.occlusion_wgt = occlusion_wgt
+        self.total_length = total_length
         if model_type == 'multivariate_rnn' or model_type == 'mlp':
             self.model_type = model_type
         else:
@@ -275,6 +279,9 @@ class ModelInterpreter:
                 # Convert the column indeces to the column names
                 self.id_column_name = self.feat_names[self.id_column_num]
                 self.inst_column_name = self.feat_names[self.inst_column_num]
+                if self.total_length is None:
+                    # Find the maximum sequence length, so that the ML models and their related methods can handle all sequences, which have varying sequence lengths
+                    self.total_length = data.groupby(self.id_column_name)[self.inst_column_name].count().max()
                 if self.label_column_num is None:
                     # Counter that indicates in which column we're in when searching for the label column
                     col_num = 0
@@ -290,7 +297,7 @@ class ModelInterpreter:
                     self.label_column_name = self.feat_names[self.label_column_num]
                 self.feat_names = du.utils.remove_from_list(self.feat_names,
                                                             to_remove=[self.id_column_name,
-                                                                    self.label_column_name],
+                                                                       self.label_column_name],
                                                             update_idx=False)
                 # Fetch the column numbers, ignoring the ID column
                 self.feat_num = list(range(len(data.columns)))
@@ -300,16 +307,16 @@ class ModelInterpreter:
                 # Also update the idx when removing the label, since the features
                 # tensors aren't going to contain the label
                 self.feat_num = du.utils.remove_from_list(self.feat_num,
-                                                        to_remove=self.label_column_num,
-                                                        update_idx=True)
+                                                          to_remove=self.label_column_num,
+                                                          update_idx=True)
                 if self.model_type == 'multivariate_rnn':
                     # Also ignore the instance ID column
                     self.feat_names = du.utils.remove_from_list(self.feat_names,
                                                                 to_remove=self.inst_column_name,
                                                                 update_idx=False)
                     self.feat_num = du.utils.remove_from_list(self.feat_num,
-                                                            to_remove=self.inst_column_num,
-                                                            update_idx=False)
+                                                              to_remove=self.inst_column_num,
+                                                              update_idx=False)
                     # Find the sequence lengths of the data
                     self.seq_len_dict = du.padding.get_sequence_length_dict(data, id_column=self.id_column_name, ts_column=self.inst_column_name)
                     # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
@@ -359,7 +366,7 @@ class ModelInterpreter:
                                                           to_remove=self.inst_column_num,
                                                           update_idx=False)
 
-        # Declare explainer attribute which will store the SHAP DEEP Explainer object
+        # Declare explainer attribute which will store the SHAP Explainer object
         self.explainer = None
         # Declare attributes that will store importance scores (instance and feature importance)
         self.inst_scores = None
@@ -710,7 +717,8 @@ class ModelInterpreter:
     def feature_importance(self, test_data=None, model_type=None,
                            method='shap', fast_calc=None, see_progress=True,
                            bkgnd_data=None, max_iter=100, l1_coeff=0, lr=0.001,
-                           recur_layer=None, create_new_explainer=True, debug_loss=False):
+                           recur_layer=None, create_new_explainer=True, debug_loss=False,
+                           total_length=None):
         '''Calculate the feature importance scores to interpret the impact
         of each feature in each instance's output.
 
@@ -737,6 +745,9 @@ class ModelInterpreter:
         see_progress : bool, default True
             If set to True, a progress bar will show up indicating the execution
             of the feature importance scores calculations.
+        total_length : int, default None
+            If not None, the feature importance scores will be padded to have 
+            length total_length.
 
         if fast_calc is False:
 
@@ -787,6 +798,9 @@ class ModelInterpreter:
             model_type = self.model_type
         else:
             self.model_type = model_type
+        if total_length is None:
+            # Use the predefined option if total_length isn't set in the function call
+            total_length = self.total_length
 
         if model_type == 'multivariate_rnn':
             # Sort the test data by sequence length
@@ -840,7 +854,7 @@ class ModelInterpreter:
             start_time = time.time()
             # Explain the predictions of the sequences in the test set
             print('Calculating feature importance scores for each instance in the test data...')
-            feat_scores = self.explainer.shap_values(test_data, l1_reg='num_features(20)', nsamples=self.SHAP_bkgnd_samples)
+            feat_scores = self.explainer.shap_values(test_data, l1_reg='num_features(10)', nsamples=self.SHAP_bkgnd_samples, max_seq_len=total_length)
             print(f'Calculation of SHAP values took {time.time() - start_time} seconds')
             return feat_scores
 
@@ -868,16 +882,18 @@ class ModelInterpreter:
                         new_data=False, model_type=None, df=None,
                         instance_importance=True, feature_importance=False,
                         fast_calc=None, create_new_explainer=True,
-                        see_progress=True, save_data=True, debug_loss=False):
+                        see_progress=True, save_data=True, debug_loss=False,
+                        total_length=None):
         '''Method to calculate scores of feature and/or instance importance, in
         order to be able to interpret a model on a given data.
 
         Parameters
         ----------
         bkgnd_data : torch.Tensor, default None
-            In case of setting fast_calc to True, which makes the algorithm use
-            SHAP in the feature importance, the background data used in the
-            explainer can be set through this parameter as a PyTorch tensor.
+            In case of setting fast_calc to False, which makes the algorithm
+            require background data in SHAP during the feature importance, the
+            background data used in the explainer can be set through this
+            parameter.
         test_data : torch.Tensor, default None
             Optionally, the user can specify a subset of data on which model
             interpretation will be made (i.e. calculating feature and/or
@@ -934,6 +950,9 @@ class ModelInterpreter:
         debug_loss : bool, default False
             Debugging flag, which makes the method also return an array of the
             mask filter optimization loss.
+        total_length : int, default None
+            If not None, the feature importance scores will be padded to have 
+            length total_length.
 
         Returns
         -------
@@ -972,6 +991,9 @@ class ModelInterpreter:
             model_type = self.model_type
         else:
             self.model_type = model_type
+        if total_length is None:
+            # Use the predefined option if total_length isn't set in the function call
+            total_length = self.total_length
 
         if test_labels is not None:
             if type(test_labels) is np.ndarray:
@@ -1032,12 +1054,13 @@ class ModelInterpreter:
                 self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type, 
                                                                      feature_importance, 
                                                                      fast_calc, see_progress, 
-                                                                     bkgnd_data, debug_loss=True)
+                                                                     bkgnd_data, debug_loss=True, 
+                                                                     total_length=total_length)
             else:
                 self.feat_scores = self.feature_importance(test_data, model_type, feature_importance,  
                                                            fast_calc, see_progress, bkgnd_data, 
                                                            create_new_explainer=create_new_explainer, 
-                                                           debug_loss=False)
+                                                           debug_loss=False, total_length=total_length)
 
         print('Done!')
 
@@ -1404,6 +1427,8 @@ class ModelInterpreter:
         data_n_shap_df : pandas.DataFrame
             Dataframe that contains both the original data used in the 
             interpretation of the model and the resulting SHAP values.'''
+        # [TODO] Add option to handle pre-calculated SHAP values
+        # (pre-defined data and SHAP values, outside of the Model Interpreter)
         # Join the original data and the features' SHAP values
         data_n_shap = np.concatenate([self.test_data.numpy(), self.test_labels.unsqueeze(2).numpy(), self.feat_scores], axis=2)
         # Reshape into a 2D format
