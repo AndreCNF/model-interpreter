@@ -18,6 +18,7 @@ everett = "^1.0"
 comet-ml = "^3.1.2"
 pillow = "^7.0.0"
 comet_ml = "^3.1.12"
+modin = "0.7.3"
 
 [tool.poetry.dev-dependencies]
 

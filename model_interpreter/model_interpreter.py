@@ -123,7 +123,7 @@ class KernelFunction:
 
     def f(self, data, hidden_state=None):
         '''Function that will be used in the SHAP kernel explainer, converting
-        a dataframe object into the model's output.
+        a NumPy array into the model's output.
 
         Parameters
         ----------
@@ -131,8 +131,8 @@ class KernelFunction:
             Data corresponding to a single instance (or timestamp, in a time
             series) used in the SHAP kernel explainer.
         hidden_state : torch.Tensor or tuple of two torch.Tensor, default None
-                Hidden state coming from the previous recurrent cell. If none is
-                specified, the hidden state is initialized as zero.
+            Hidden state coming from the previous recurrent cell. If none is
+            specified, the hidden state is initialized as zero.
 
         Returns
         -------
@@ -158,7 +158,7 @@ class ModelInterpreter:
     def __init__(self, model, data=None, labels=None, model_type='multivariate_rnn',
                  is_custom=False, already_embedded=False, seq_len_dict=None,
                  id_column=0, inst_column=None, label_column=None, fast_calc=True,
-                 SHAP_bkgnd_samples=1000, random_seed=42, feat_names=None,
+                 SHAP_bkgnd_samples='auto', random_seed=42, feat_names=None,
                  padding_value=999999, occlusion_wgt=0.7, total_length=None):
         '''A machine learning model interpreter which calculates instance and
         feature importance.
@@ -212,7 +212,7 @@ class ModelInterpreter:
             more time in order to get a more precise and truthful
             interpretation of the model's behavior, requiring longer
             computation times.
-        SHAP_bkgnd_samples : int, default 1000
+        SHAP_bkgnd_samples : int, default 'auto'
             Number of samples to use as background data, in case a SHAP
             explainer is applied (fast_calc must be set to False).
         random_seed : integer, default 42
@@ -234,7 +234,7 @@ class ModelInterpreter:
             is a normal, unweighted average and 1 deactivates the use of the
             output variation part.
         total_length : int, default None
-            If not None, the feature importance scores will be padded to have 
+            If not None, the feature importance scores will be padded to have
             length total_length.
         '''
         # Initialize parameters according to user input
@@ -746,7 +746,7 @@ class ModelInterpreter:
             If set to True, a progress bar will show up indicating the execution
             of the feature importance scores calculations.
         total_length : int, default None
-            If not None, the feature importance scores will be padded to have 
+            If not None, the feature importance scores will be padded to have
             length total_length.
 
         if fast_calc is False:
@@ -951,7 +951,7 @@ class ModelInterpreter:
             Debugging flag, which makes the method also return an array of the
             mask filter optimization loss.
         total_length : int, default None
-            If not None, the feature importance scores will be padded to have 
+            If not None, the feature importance scores will be padded to have
             length total_length.
 
         Returns
@@ -1051,15 +1051,15 @@ class ModelInterpreter:
             print('Calculating feature importance scores...')
             # Calculate the scores of importance of each feature in each instance
             if feature_importance == 'mask filter' and debug_loss:
-                self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type, 
-                                                                     feature_importance, 
-                                                                     fast_calc, see_progress, 
-                                                                     bkgnd_data, debug_loss=True, 
+                self.feat_scores, loss_mtx = self.feature_importance(test_data, model_type,
+                                                                     feature_importance,
+                                                                     fast_calc, see_progress,
+                                                                     bkgnd_data, debug_loss=True,
                                                                      total_length=total_length)
             else:
-                self.feat_scores = self.feature_importance(test_data, model_type, feature_importance,  
-                                                           fast_calc, see_progress, bkgnd_data, 
-                                                           create_new_explainer=create_new_explainer, 
+                self.feat_scores = self.feature_importance(test_data, model_type, feature_importance,
+                                                           fast_calc, see_progress, bkgnd_data,
+                                                           create_new_explainer=create_new_explainer,
                                                            debug_loss=False, total_length=total_length)
 
         print('Done!')
@@ -1082,10 +1082,10 @@ class ModelInterpreter:
 
 
     def instance_importance_plot(self, orig_data=None, inst_scores=None, seq_id=None,
-                                 pred_prob=None, uniform_spacing=False, 
+                                 pred_prob=None, uniform_spacing=False,
                                  show_pred_prob=True, show_title=True,
                                  show_colorbar=True, click_mode='event+select',
-                                 labels=None, seq_len=None, threshold=0, 
+                                 labels=None, seq_len=None, threshold=0,
                                  get_fig_obj=False, tensor_idx=True,
                                  max_seq=10, background_color='white',
                                  font_family='Roboto', font_size=14,
@@ -1120,17 +1120,17 @@ class ModelInterpreter:
             If set to True, a bar legend will be shown, corresponding each color
             to each respective value.
         click_mode : string, default 'event+select'
-            Determines the mode of single click interactions. "event" is the 
-            default value and emits the `plotly_click` event. In addition this 
-            mode emits the `plotly_selected` event in drag modes "lasso" and 
-            "select", but with no event data attached (kept for compatibility 
-            reasons). The "select" flag enables selecting single data points via 
-            click. This mode also supports persistent selections, meaning that 
-            pressing Shift while clicking, adds to / subtracts from an existing 
-            selection. "select" with `hovermode`: "x" can be confusing, consider 
-            explicitly setting `hovermode`: "closest" when using this feature. 
-            Selection events are sent accordingly as long as "event" flag is set 
-            as well. When the "event" flag is missing, `plotly_click` and 
+            Determines the mode of single click interactions. "event" is the
+            default value and emits the `plotly_click` event. In addition this
+            mode emits the `plotly_selected` event in drag modes "lasso" and
+            "select", but with no event data attached (kept for compatibility
+            reasons). The "select" flag enables selecting single data points via
+            click. This mode also supports persistent selections, meaning that
+            pressing Shift while clicking, adds to / subtracts from an existing
+            selection. "select" with `hovermode`: "x" can be confusing, consider
+            explicitly setting `hovermode`: "closest" when using this feature.
+            Selection events are sent accordingly as long as "event" flag is set
+            as well. When the "event" flag is missing, `plotly_click` and
             `plotly_selected` events are not fired.
         labels : torch.Tensor, default None
             Labels corresponding to the data used, either specified in the input
@@ -1419,13 +1419,13 @@ class ModelInterpreter:
     # seeing which one caused a bigger change in the output.
 
     def shap_values_df(self):
-        '''Create a dataframe that contains both the original data used in the 
+        '''Create a dataframe that contains both the original data used in the
         interpretation of the model and the resulting SHAP values.
 
         Returns
         -------
         data_n_shap_df : pandas.DataFrame
-            Dataframe that contains both the original data used in the 
+            Dataframe that contains both the original data used in the
             interpretation of the model and the resulting SHAP values.'''
         # [TODO] Add option to handle pre-calculated SHAP values
         # (pre-defined data and SHAP values, outside of the Model Interpreter)
