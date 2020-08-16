@@ -140,11 +140,14 @@ class KernelFunction:
             Output of the model obtained with the given instance data and
             possible hidden state.
         '''
-        # Make sure the data is of type float
-        data = torch.from_numpy(data).float()
+        if isinstance(data, np.ndarray):
+            # Make sure the data is of type float
+            data = torch.from_numpy(data).float()
         # Calculate the output
         if self.model_type == 'multivariate_rnn':
-            output = self.model(data.unsqueeze(0), hidden_state=hidden_state)
+            if len(data.shape) < 3:
+                data = data.unsqueeze(0)
+            output = self.model(data, hidden_state=hidden_state)
         elif self.model_type == 'mlp':
             output = self.model(data)
         else:
