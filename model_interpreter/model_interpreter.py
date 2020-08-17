@@ -1382,7 +1382,7 @@ class ModelInterpreter:
                 layout['shapes'] = shapes_list
             if len(patients) > max_seq:
                 # Prevent cramming too many sequences into the plot
-                layout['yaxis']['range'] = [patients[-max_seq], patients[-1]]
+                layout['yaxis']['range'] = [patients[max_seq], patients[0]]
         # Show the plot
         fig = go.Figure(plot_data, layout)
 
