@@ -19,8 +19,7 @@ NEG_COLOR = 'rgba(30,136,229,1)'
 
 # Auxiliary hidden methods
 def calc_instance_score(model, sequence_data, instance, ref_output, x_length,
-                        occlusion_wgt=0.7, id_column=0, inst_column=1,
-                        is_custom=False):
+                        occlusion_wgt=0.7, id_column=0, inst_column=1):
     '''Calculate the instance importance score for a given instance.
 
     Parameters
@@ -56,10 +55,6 @@ def calc_instance_score(model, sequence_data, instance, ref_output, x_length,
     inst_column : int, default 1
         Number of the column which corresponds to the instance or timestamp
         identifier in the data tensor.
-    is_custom : bool, default False
-        If set to True, the method will assume that the model being used is a
-        custom built one, which won't require sequence length information during
-        the feedforward process.
 
     Returns
     -------
@@ -76,38 +71,30 @@ def calc_instance_score(model, sequence_data, instance, ref_output, x_length,
     sequence_data = sequence_data[instances_idx, :]
     # Add a third dimension for the data to be readable by the model
     sequence_data = sequence_data.unsqueeze(0)
+    # Update the sequence length as the instance is removed
+    new_seq_length = x_length-1
     # Calculate the output without the instance that is being analyzed
-    if is_custom is True:
-        new_output = model(sequence_data)
-    else:
-        new_output = model(sequence_data, [x_length-1])
+    new_output = model(sequence_data[:, :new_seq_length, :])
     # Only use the last output (i.e. the one from the last instance of the sequence)
-    new_output = new_output[-1].item()
+    new_output = new_output[new_seq_length-1].item()
     # Flag that indicates whether the output variation component will be used in the instance importance score
     # (in a weighted average)
-    use_outvar_score = ref_output.shape[0] > 1
-
+    use_outvar_score = ref_output.shape[0] > 1 and instance > 0
     if use_outvar_score:
         # Get the output from the previous instance
         prev_output = ref_output[instance-1].item()
         # Get the output from the current instance
         curr_output = ref_output[instance].item()
-        # Get the last output
-        ref_output = ref_output[x_length-1].item()
-    else:
-        ref_output = ref_output.item()
-
+    # Get the last output
+    ref_output = ref_output[x_length-1].item()
     # The instance importance score is then the difference between the output probability with the instance
     # and the probability without the instance
     inst_score = ref_output - new_output
-
     if instance > 0 and use_outvar_score:
         # If it's not the first instance, add the output variation characteristic in a weighted average
         inst_score = occlusion_wgt * inst_score + (1 - occlusion_wgt) * (curr_output - prev_output)
-
     # Apply a tanh function to make even the smaller scores (which are the most frequent) more salient
     inst_score = np.tanh(4 * inst_score)
-
     return inst_score
 
 class KernelFunction:
@@ -698,8 +685,8 @@ class ModelInterpreter:
             ref_output = [ref_output[start_idx[i]:final_seq_idx[i]] for i in range(len(start_idx))]
 
         inst_scores = [[calc_instance_score(self.model, data[seq_num, :, :], inst, ref_output[seq_num],
-                                            x_lengths[seq_num], occlusion_wgt, self.id_column_num, self.inst_column_num,
-                                            self.is_custom)
+                                            x_lengths[seq_num], occlusion_wgt, self.id_column_num,
+                                            self.inst_column_num)
                         for inst in range(x_lengths[seq_num])] for seq_num in tqdm(range(data.shape[0]), disable=not see_progress)]
         # DEBUG
         # inst_scores = []
@@ -852,9 +839,9 @@ class ModelInterpreter:
                     # When using custom models, the whole model behaves as a recurrent layer
                     # We just need to make sure that it returns the hidden state
                     recur_layer = partial(self.model.forward, get_hidden_state=True)
-                self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, isBidir=isBidir, 
+                self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, isBidir=isBidir,
                                                       model_obj=self.model, max_bkgnd_samples=100,
-                                                      id_col_num=self.id_column_num, 
+                                                      id_col_num=self.id_column_num,
                                                       ts_col_num=self.inst_column_num,
                                                       recur_layer=recur_layer)
             # Count the time that takes to calculate the SHAP values
@@ -1373,12 +1360,13 @@ class ModelInterpreter:
                 clickmode=click_mode
             )
             if show_title is True:
-                layout.title = 'Instance importance'
+                layout['title'] = 'Instance importance'
                 layout['margin'] = dict(l=0, r=0, t=30, b=0, pad=0)
             else:
                 layout['margin'] = dict(l=0, r=0, t=0, b=0, pad=0)
             if show_colorbar is True:
-                layout['colorbar'] = dict(title='Scores')
+                layout['meta'] = dict()
+                layout['meta']['colorbar'] = dict(title='Scores')
             if show_pred_prob is True:
                 # Add hover text to indicate the final output probabilities
                 prob_hover_info = go.Scatter(
@@ -1391,7 +1379,7 @@ class ModelInterpreter:
                 )
                 plot_data.append(prob_hover_info)
                 # Add final output probabilities bar plots
-                layout.shapes = shapes_list
+                layout['shapes'] = shapes_list
             if len(patients) > max_seq:
                 # Prevent cramming too many sequences into the plot
                 layout['yaxis']['range'] = [patients[-max_seq], patients[-1]]
