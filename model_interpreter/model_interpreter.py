@@ -810,6 +810,8 @@ class ModelInterpreter:
             test_data, x_lengths_test = du.padding.sort_by_seq_len(test_data, self.seq_len_dict)
         # Set an indicator to log that the current model is a RNN
         isRNN = model_type == 'multivariate_rnn'
+        # Set an indicator to log that the current model is a bidirectional
+        isBidir = self.model.bidir
 
         if method.lower() == 'shap':
             if create_new_explainer is True:
@@ -850,8 +852,10 @@ class ModelInterpreter:
                     # When using custom models, the whole model behaves as a recurrent layer
                     # We just need to make sure that it returns the hidden state
                     recur_layer = partial(self.model.forward, get_hidden_state=True)
-                self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, model_obj=self.model, max_bkgnd_samples=100,
-                                                      id_col_num=self.id_column_num, ts_col_num=self.inst_column_num,
+                self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, isBidir=isBidir, 
+                                                      model_obj=self.model, max_bkgnd_samples=100,
+                                                      id_col_num=self.id_column_num, 
+                                                      ts_col_num=self.inst_column_num,
                                                       recur_layer=recur_layer)
             # Count the time that takes to calculate the SHAP values
             start_time = time.time()
