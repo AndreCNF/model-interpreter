@@ -147,9 +147,11 @@ class KernelFunction:
 class ModelInterpreter:
     def __init__(self, model, data=None, labels=None, model_type='multivariate_rnn',
                  is_custom=False, already_embedded=False, seq_len_dict=None,
-                 id_column=0, inst_column=None, label_column=None, fast_calc=True,
-                 SHAP_bkgnd_samples='auto', random_seed=42, feat_names=None,
-                 padding_value=999999, occlusion_wgt=0.7, total_length=None):
+                 id_column_num=None, id_column_name=None, inst_column_num=None,
+                 inst_column_name=None, label_column_num=None, label_column_name=None,
+                 fast_calc=True, SHAP_bkgnd_samples='auto', random_seed=42,
+                 feat_names=None, padding_value=999999, occlusion_wgt=0.7,
+                 total_length=None):
         '''A machine learning model interpreter which calculates instance and
         feature importance.
 
@@ -186,14 +188,23 @@ class ModelInterpreter:
             Dictionary containing the sequence lengths for each index of the
             original dataframe. This allows to ignore the padding done in
             the fixed sequence length tensor.
-        id_column : int, default 0
+        id_column_num : int, default None
             Number of the column which corresponds to the subject identifier in
             the data tensor.
-        inst_column : int, default None
+        id_column_name : string, default None
+            Name of the column which corresponds to the subject identifier in
+            the data tensor.
+        inst_column_num : int, default None
             Number of the column which corresponds to the instance or timestamp
             identifier in the data tensor.
-        label_column : int, default None
+        inst_column_name : string, default None
+            Name of the column which corresponds to the instance or timestamp
+            identifier in the data tensor.
+        label_column_num : int, default None
             Number of the column which corresponds to the label in the data
+            tensor. Only needed if the data is in dataframe format.
+        label_column_name : string, default None
+            Name of the column which corresponds to the label in the data
             tensor. Only needed if the data is in dataframe format.
         fast_calc : bool, default True
             If set to True, the algorithm uses less background samples (SHAP)
@@ -231,9 +242,12 @@ class ModelInterpreter:
         self.model = model
         self.data = data
         self.seq_len_dict = seq_len_dict
-        self.id_column_num = id_column
-        self.inst_column_num = inst_column
-        self.label_column_num = label_column
+        self.id_column_num = id_column_num
+        self.id_column_name = id_column_name
+        self.inst_column_num = inst_column_num
+        self.inst_column_name = inst_column_name
+        self.label_column_num = label_column_num
+        self.label_column_name = label_column_name
         self.fast_calc = fast_calc
         self.SHAP_bkgnd_samples = SHAP_bkgnd_samples
         self.random_seed = random_seed
@@ -266,23 +280,36 @@ class ModelInterpreter:
             elif type(data) is pd.DataFrame:
                 # Fetch the column names, ignoring the ID column
                 self.feat_names = list(data.columns)
-                # Convert the column indeces to the column names
-                self.id_column_name = self.feat_names[self.id_column_num]
-                self.inst_column_name = self.feat_names[self.inst_column_num]
+                if self.id_column_num is None and self.id_column_name is not None:
+                    # Find the ID column number
+                    self.id_column_num = du.search_explore.find_col_idx(data, self.id_column_name)
+                elif self.id_column_num is not None and self.id_column_name is None:
+                    # Convert the ID column index to the column name
+                    self.id_column_name = self.feat_names[self.id_column_num]
+                if self.inst_column_num is None and self.inst_column_name is not None:
+                    # Find the instance column number
+                    self.inst_column_num = du.search_explore.find_col_idx(data, self.inst_column_name)
+                elif self.inst_column_num is not None and self.inst_column_name is None:
+                    # Convert the instance column index to the column name
+                    self.inst_column_name = self.feat_names[self.inst_column_num]
                 if self.total_length is None:
                     # Find the maximum sequence length, so that the ML models and their related methods can handle all sequences, which have varying sequence lengths
                     self.total_length = data.groupby(self.id_column_name)[self.inst_column_name].count().max()
                 if self.label_column_num is None:
-                    # Counter that indicates in which column we're in when searching for the label column
-                    col_num = 0
-                    for col in data.columns:
-                        if 'label' in col:
-                            # Column name corresponding to the label
-                            self.label_column_name = col
-                            # Column number corresponding to the label
-                            self.label_column_num = col_num
-                            break
-                        col_num += 1
+                    if self.label_column_name is not None:
+                        # Find the instance column number
+                        self.label_column_num = du.search_explore.find_col_idx(data, self.label_column_name)
+                    else:
+                        # Counter that indicates in which column we're in when searching for the label column
+                        col_num = 0
+                        for col in data.columns:
+                            if 'label' in col:
+                                # Column name corresponding to the label
+                                self.label_column_name = col
+                                # Column number corresponding to the label
+                                self.label_column_num = col_num
+                                break
+                            col_num += 1
                 if self.label_column_name is None:
                     self.label_column_name = self.feat_names[self.label_column_num]
                 self.feat_names = du.utils.remove_from_list(self.feat_names,
@@ -312,10 +339,11 @@ class ModelInterpreter:
                     # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
                     data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
                                                                         ts_column=self.inst_column_name, padding_value=padding_value,
-                                                                        inplace=True)
+                                                                        label_column=self.label_column_name, inplace=True)
                     # Separate labels from features
                     dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
-                                                              seq_len_dict=self.seq_len_dict)
+                                                              seq_len_dict=self.seq_len_dict,
+                                                              label_name=self.label_column_name)
                 elif self.model_type == 'mlp':
                     # Convert into a PyTorch tensor
                     data_tensor = torch.from_numpy(data.numpy())
