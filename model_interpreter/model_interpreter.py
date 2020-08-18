@@ -339,7 +339,8 @@ class ModelInterpreter:
                     # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
                     data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
                                                                         ts_column=self.inst_column_name, padding_value=padding_value,
-                                                                        label_column=self.label_column_name, inplace=True)
+                                                                        label_column=self.label_column_name, total_length=self.total_length, 
+                                                                        inplace=True)
                     # Separate labels from features
                     dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
                                                               seq_len_dict=self.seq_len_dict,
