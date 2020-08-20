@@ -357,8 +357,24 @@ class ModelInterpreter:
                 raise Exception('ERROR: Invalid data type. Please provide data in a Pandas DataFrame, PyTorch Tensor or NumPy Array format.')
         else:
             # Convert the column indeces to the column names
-            self.id_column_name = self.feat_names[self.id_column_num]
-            self.inst_column_name = self.feat_names[self.inst_column_num]
+            if self.id_column_num is None and self.id_column_name is not None:
+                # Find the ID column number
+                self.id_column_num = self.feat_names.index(self.id_column_name)
+            elif self.id_column_num is not None and self.id_column_name is None:
+                # Convert the ID column index to the column name
+                self.id_column_name = self.feat_names[self.id_column_num]
+            if self.inst_column_num is None and self.inst_column_name is not None:
+                # Find the instance column number
+                self.inst_column_num =  self.feat_names.index(self.inst_column_name)
+            elif self.inst_column_num is not None and self.inst_column_name is None:
+                # Convert the instance column index to the column name
+                self.inst_column_name = self.feat_names[self.inst_column_num]
+            if self.label_column_num is None and self.label_column_name is not None:
+                # Find the label column number
+                self.label_column_num =  self.feat_names.index(self.label_column_name)
+            elif self.label_column_num is not None and self.label_column_name is None:
+                # Convert the label column index to the column name
+                self.label_column_name = self.feat_names[self.label_column_num]
             # Fetch the column numbers, ignoring the ID column
             self.feat_num = list(range(len(self.feat_names)))
             self.feat_num = du.utils.remove_from_list(self.feat_num,
