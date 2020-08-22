@@ -877,13 +877,16 @@ class ModelInterpreter:
                 kf = KernelFunction(self.model, model_type=model_type)
                 # Use the background dataset to integrate over
                 print('Creating a SHAP kernel explainer...')
-                if self.is_custom is False:
-                    # Let SHAP find the recurrent layer
-                    recur_layer = None
-                else:
-                    # When using custom models, the whole model behaves as a recurrent layer
-                    # We just need to make sure that it returns the hidden state
-                    recur_layer = partial(self.model.forward, get_hidden_state=True)
+                # [TODO] Removing this part of directly handling pure RNN models, as the `is_custom` parameter collides 
+                # with other definitions of it; ignoring for now as I'm never using pure RNNs, without any modification 
+                # or at least wrapping in some class.
+                # if self.is_custom is False:
+                    # # Let SHAP find the recurrent layer
+                    # recur_layer = None
+                # else:
+                # When using custom models, the whole model behaves as a recurrent layer
+                # We just need to make sure that it returns the hidden state
+                recur_layer = partial(self.model.forward, get_hidden_state=True)
                 self.explainer = shap.KernelExplainer(kf.f, bkgnd_data, isRNN=isRNN, isBidir=isBidir,
                                                       model_obj=self.model, max_bkgnd_samples=100,
                                                       id_col_num=self.id_column_num,
