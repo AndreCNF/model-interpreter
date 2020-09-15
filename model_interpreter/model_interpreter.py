@@ -145,6 +145,92 @@ class KernelFunction:
             return output.detach().numpy()
 
 class ModelInterpreter:
+    '''A machine learning model interpreter which calculates instance and
+    feature importance.
+
+    The current focus of the class is to analyze neural networks built in
+    the PyTorch framework, which classify sequential data with potentially
+    variable sequence length.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Machine learning model which will be interpreted.
+    data : torch.Tensor or pandas.DataFrame, default None
+        Data used in the interpretation, either directly by analyzing the
+        outputs obtained with each sample or indireclty by using as
+        background data in methods such as SHAP explainers. The data will be
+        used in PyTorch tensor format, but the user can submit it as a
+        pandas dataframe, which is then automatically padded and converted.
+    labels : torch.Tensor, default None
+        Labels corresponding to the data used, either specified in the input
+        or all the data that the interpreter has.
+    model_type : string, default 'multivariate_rnn'
+        Sets the type of machine learning model. Important to know what type
+        of inference and data processing to do. Currently available options
+        are ['multivariate_rnn', 'mlp'].
+    is_custom : bool, default False
+        If set to True, the method will assume that the model being used is a
+        custom built one, which won't require sequence length information during
+        the feedforward process.
+    already_embedded : bool, default False
+        If set to True, it means that the categorical features are already
+        embedded when fetching a batch, i.e. there's no need to run the embedding
+        layer(s) during the model's feedforward.
+    seq_len_dict : dict, default None
+        Dictionary containing the sequence lengths for each index of the
+        original dataframe. This allows to ignore the padding done in
+        the fixed sequence length tensor.
+    id_column_num : int, default None
+        Number of the column which corresponds to the subject identifier in
+        the data tensor.
+    id_column_name : string, default None
+        Name of the column which corresponds to the subject identifier in
+        the data tensor.
+    inst_column_num : int, default None
+        Number of the column which corresponds to the instance or timestamp
+        identifier in the data tensor.
+    inst_column_name : string, default None
+        Name of the column which corresponds to the instance or timestamp
+        identifier in the data tensor.
+    label_column_num : int, default None
+        Number of the column which corresponds to the label in the data
+        tensor. Only needed if the data is in dataframe format.
+    label_column_name : string, default None
+        Name of the column which corresponds to the label in the data
+        tensor. Only needed if the data is in dataframe format.
+    fast_calc : bool, default True
+        If set to True, the algorithm uses less background samples (SHAP)
+        or optimization steps (mask filter), in order to do a fast
+        interpretation of the model. If set to False, the process takes
+        more time in order to get a more precise and truthful
+        interpretation of the model's behavior, requiring longer
+        computation times.
+    SHAP_bkgnd_samples : int, default 'auto'
+        Number of samples to use as background data, in case a SHAP
+        explainer is applied (fast_calc must be set to False).
+    random_seed : integer, default 42
+        Seed used when shuffling the data.
+    feat_names : list of string, default None
+        Column names of the dataframe associated to the data. If no list is
+        provided, the dataframe should be given in the data argument, so as
+        to fetch the names of the columns.
+    padding_value : numeric
+        Value to use in the padding, to fill the sequences.
+    occlusion_wgt : float, default 0.7
+        Weight given to the occlusion part of the instance importance score.
+        This scores is calculated as a weighted average of the instance's
+        influence on the final output and the variation of the output
+        probability, between the current instance and the previous one. As
+        such, this weight should have a value between 0 and 1, with the
+        output variation receiving the remaining weight (1 - occlusion_wgt),
+        where 0 corresponds to not using the occlusion component at all, 0.5
+        is a normal, unweighted average and 1 deactivates the use of the
+        output variation part.
+    total_length : int, default None
+        If not None, the feature importance scores will be padded to have
+        length total_length.
+    '''
     def __init__(self, model, data=None, labels=None, model_type='multivariate_rnn',
                  is_custom=False, already_embedded=False, seq_len_dict=None,
                  id_column_num=None, id_column_name=None, inst_column_num=None,
@@ -152,92 +238,6 @@ class ModelInterpreter:
                  fast_calc=True, SHAP_bkgnd_samples='auto', random_seed=42,
                  feat_names=None, padding_value=999999, occlusion_wgt=0.7,
                  total_length=None):
-        '''A machine learning model interpreter which calculates instance and
-        feature importance.
-
-        The current focus of the class is to analyze neural networks built in
-        the PyTorch framework, which classify sequential data with potentially
-        variable sequence length.
-
-        Parameters
-        ----------
-        model : nn.Module
-            Machine learning model which will be interpreted.
-        data : torch.Tensor or pandas.DataFrame, default None
-            Data used in the interpretation, either directly by analyzing the
-            outputs obtained with each sample or indireclty by using as
-            background data in methods such as SHAP explainers. The data will be
-            used in PyTorch tensor format, but the user can submit it as a
-            pandas dataframe, which is then automatically padded and converted.
-        labels : torch.Tensor, default None
-            Labels corresponding to the data used, either specified in the input
-            or all the data that the interpreter has.
-        model_type : string, default 'multivariate_rnn'
-            Sets the type of machine learning model. Important to know what type
-            of inference and data processing to do. Currently available options
-            are ['multivariate_rnn', 'mlp'].
-        is_custom : bool, default False
-            If set to True, the method will assume that the model being used is a
-            custom built one, which won't require sequence length information during
-            the feedforward process.
-        already_embedded : bool, default False
-            If set to True, it means that the categorical features are already
-            embedded when fetching a batch, i.e. there's no need to run the embedding
-            layer(s) during the model's feedforward.
-        seq_len_dict : dict, default None
-            Dictionary containing the sequence lengths for each index of the
-            original dataframe. This allows to ignore the padding done in
-            the fixed sequence length tensor.
-        id_column_num : int, default None
-            Number of the column which corresponds to the subject identifier in
-            the data tensor.
-        id_column_name : string, default None
-            Name of the column which corresponds to the subject identifier in
-            the data tensor.
-        inst_column_num : int, default None
-            Number of the column which corresponds to the instance or timestamp
-            identifier in the data tensor.
-        inst_column_name : string, default None
-            Name of the column which corresponds to the instance or timestamp
-            identifier in the data tensor.
-        label_column_num : int, default None
-            Number of the column which corresponds to the label in the data
-            tensor. Only needed if the data is in dataframe format.
-        label_column_name : string, default None
-            Name of the column which corresponds to the label in the data
-            tensor. Only needed if the data is in dataframe format.
-        fast_calc : bool, default True
-            If set to True, the algorithm uses less background samples (SHAP)
-            or optimization steps (mask filter), in order to do a fast
-            interpretation of the model. If set to False, the process takes
-            more time in order to get a more precise and truthful
-            interpretation of the model's behavior, requiring longer
-            computation times.
-        SHAP_bkgnd_samples : int, default 'auto'
-            Number of samples to use as background data, in case a SHAP
-            explainer is applied (fast_calc must be set to False).
-        random_seed : integer, default 42
-            Seed used when shuffling the data.
-        feat_names : list of string, default None
-            Column names of the dataframe associated to the data. If no list is
-            provided, the dataframe should be given in the data argument, so as
-            to fetch the names of the columns.
-        padding_value : numeric
-            Value to use in the padding, to fill the sequences.
-        occlusion_wgt : float, default 0.7
-            Weight given to the occlusion part of the instance importance score.
-            This scores is calculated as a weighted average of the instance's
-            influence on the final output and the variation of the output
-            probability, between the current instance and the previous one. As
-            such, this weight should have a value between 0 and 1, with the
-            output variation receiving the remaining weight (1 - occlusion_wgt),
-            where 0 corresponds to not using the occlusion component at all, 0.5
-            is a normal, unweighted average and 1 deactivates the use of the
-            output variation part.
-        total_length : int, default None
-            If not None, the feature importance scores will be padded to have
-            length total_length.
-        '''
         # Initialize parameters according to user input
         self.model = model
         self.data = data
@@ -339,7 +339,7 @@ class ModelInterpreter:
                     # Pad data (to have fixed sequence length) and convert into a PyTorch tensor
                     data_tensor = du.padding.dataframe_to_padded_tensor(data, seq_len_dict=self.seq_len_dict, id_column=self.id_column_name,
                                                                         ts_column=self.inst_column_name, padding_value=padding_value,
-                                                                        label_column=self.label_column_name, total_length=self.total_length, 
+                                                                        label_column=self.label_column_name, total_length=self.total_length,
                                                                         inplace=True)
                     # Separate labels from features
                     dataset = du.datasets.Time_Series_Dataset(data, data_tensor,
@@ -877,8 +877,8 @@ class ModelInterpreter:
                 kf = KernelFunction(self.model, model_type=model_type)
                 # Use the background dataset to integrate over
                 print('Creating a SHAP kernel explainer...')
-                # [TODO] Removing this part of directly handling pure RNN models, as the `is_custom` parameter collides 
-                # with other definitions of it; ignoring for now as I'm never using pure RNNs, without any modification 
+                # [TODO] Removing this part of directly handling pure RNN models, as the `is_custom` parameter collides
+                # with other definitions of it; ignoring for now as I'm never using pure RNNs, without any modification
                 # or at least wrapping in some class.
                 # if self.is_custom is False:
                     # # Let SHAP find the recurrent layer

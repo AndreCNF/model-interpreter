@@ -13,12 +13,13 @@ plotly = "^4.8.1"
 tqdm = "^4.32"
 colorlover = "^0.3.0"
 shap = {git = "https://github.com/AndreCNF/shap.git"}
-pdoc3 = "^0.7.2"
+pdoc3 = "^0.9.1"
 everett = "^1.0"
 comet-ml = "^3.1.2"
 pillow = "^7.0.0"
 comet_ml = "^3.1.12"
 modin = "0.7.3"
+data-utils = {git = "https://github.com/AndreCNF/data-utils.git"}
 
 [tool.poetry.dev-dependencies]
 
