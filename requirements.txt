@@ -14,7 +14,7 @@ filelock==3.0.12
 google==2.0.3
 grpcio==1.28.1
 idna==2.8
-joblib==0.13.2
+joblib==1.2.0
 jsonschema==3.0.2
 Mako==1.1.0
 Markdown==3.1.1
